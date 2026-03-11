@@ -1,0 +1,9 @@
+node_modules/
+dist/
+out/
+release/
+*.wasm
+.DS_Store
+.env
+.env.*
+*.tsbuildinfo
