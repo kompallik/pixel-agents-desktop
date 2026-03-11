@@ -17,6 +17,11 @@ import { createInitialSessionState } from './domain/sessionState.js';
 import type { SessionViewState } from './domain/sessionState.js';
 import { IngestionController } from './ingest/ingestionController.js';
 import type { AgentEvent } from './domain/events.js';
+import { ReplayStore } from './domain/replayStore.js';
+import type { ReplayStateSnapshot, JumpTarget } from './ingest/replayController.js';
+import { detectAgentType } from './discovery/sessionSources/manualPathSource.js';
+import { AlertEngine } from './domain/alertEngine.js';
+import { computeHealth } from './domain/healthEngine.js';
 
 let mainWindow: BrowserWindow | null = null;
 let registry: SessionRegistry | null = null;
@@ -33,6 +38,14 @@ let nextAgentId = 1;
 // Domain event pipeline (WP-2A/2B)
 const domainStore = new SessionStore();
 const ingestionControllers = new Map<string, IngestionController>();
+
+// Replay pipeline (WP-6A) — separate from live sessions
+const replayStore = new ReplayStore();
+
+// Alert and health engine (WP-5A)
+const alertEngine = new AlertEngine();
+let alertEvalTimer: ReturnType<typeof setTimeout> | null = null;
+const ALERT_EVAL_DEBOUNCE_MS = 500;
 
 // Permission timer state per agent (backward compat for renderer permission detection)
 const permissionTimers = new Map<number, ReturnType<typeof setTimeout>>();
@@ -172,6 +185,7 @@ function startDiscovery(): void {
   // Wire domain store state changes to renderer
   domainStore.on('state-changed', (sessions: SessionViewState[]) => {
     send('sessionStateUpdate', sessions);
+    scheduleAlertEvaluation();
   });
 
   // When a session is registered, create ingestion controller and start watching
@@ -231,6 +245,7 @@ function startDiscovery(): void {
       ingestionControllers.delete(record.sessionId);
     }
     domainStore.removeSession(record.sessionId);
+    alertEngine.removeAlertsForSession(record.sessionId);
   });
 
   // Load source configs and register them
@@ -335,6 +350,45 @@ function cancelPermissionTimer(agentId: number): void {
   }
 }
 
+/** Debounced alert evaluation: runs 500ms after last state change */
+function scheduleAlertEvaluation(): void {
+  if (alertEvalTimer) clearTimeout(alertEvalTimer);
+  alertEvalTimer = setTimeout(() => {
+    alertEvalTimer = null;
+    runAlertEvaluation();
+  }, ALERT_EVAL_DEBOUNCE_MS);
+}
+
+function runAlertEvaluation(): void {
+  const sessions = new Map<string, SessionViewState>();
+  for (const s of domainStore.getAllSessions()) {
+    sessions.set(s.sessionId, s);
+  }
+
+  const eventHistories = new Map<string, AgentEvent[]>();
+  for (const sessionId of sessions.keys()) {
+    eventHistories.set(sessionId, domainStore.getEventHistory(sessionId));
+  }
+
+  const collisions = domainStore.getCollisions();
+  const newAlerts = alertEngine.evaluate(sessions, eventHistories, collisions);
+
+  // Compute health scores and update alertIds on each session
+  for (const [sessionId, session] of sessions) {
+    const sessionAlerts = alertEngine.getAlertsBySession(sessionId);
+    session.healthScore = computeHealth(session, sessionAlerts);
+    session.alertIds = sessionAlerts.map((a) => a.id);
+  }
+
+  // Push updated sessions with health scores
+  if (newAlerts.length > 0 || sessions.size > 0) {
+    send('sessionStateUpdate', [...sessions.values()]);
+  }
+
+  // Always send current active alerts
+  send('alertsUpdate', alertEngine.getActiveAlerts());
+}
+
 function stopDiscovery(): void {
   if (sourceManager) {
     sourceManager.stopAll();
@@ -350,6 +404,10 @@ function stopDiscovery(): void {
     clearTimeout(timer);
   }
   permissionTimers.clear();
+  if (alertEvalTimer) {
+    clearTimeout(alertEvalTimer);
+    alertEvalTimer = null;
+  }
   sessionToAgentId.clear();
   domainStore.removeAllListeners();
   registry?.removeAllListeners();
@@ -440,6 +498,27 @@ function setupIPC(): void {
     }
   });
 
+  ipcMain.handle('selectJsonlFile', async () => {
+    if (!mainWindow) return { canceled: true };
+    const result = await dialog.showOpenDialog(mainWindow, {
+      filters: [{ name: 'JSONL Files', extensions: ['jsonl'] }],
+      properties: ['openFile'],
+      title: 'Select a JSONL session file',
+    });
+    if (result.canceled || !result.filePaths.length) return { canceled: true };
+    return { canceled: false, filePath: result.filePaths[0] };
+  });
+
+  ipcMain.handle('selectDirectory', async () => {
+    if (!mainWindow) return { canceled: true };
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openDirectory'],
+      title: 'Select a session directory to watch',
+    });
+    if (result.canceled || !result.filePaths.length) return { canceled: true };
+    return { canceled: false, directory: result.filePaths[0] };
+  });
+
   ipcMain.on('openSessionsFolder', () => {
     const claudeDir = path.join(os.homedir(), '.claude', 'projects');
     if (fs.existsSync(claudeDir)) {
@@ -495,6 +574,18 @@ function setupIPC(): void {
         rss: mem.rss,
       },
     });
+  });
+
+  // ── Alert management IPC ──────────────────────────────────────
+
+  ipcMain.handle('acknowledgeAlert', (_event, data: { alertId: string }) => {
+    alertEngine.acknowledge(data.alertId);
+    send('alertsUpdate', alertEngine.getActiveAlerts());
+    return { success: true };
+  });
+
+  ipcMain.handle('getActiveAlerts', () => {
+    return alertEngine.getActiveAlerts();
   });
 
   // ── Source management IPC ──────────────────────────────────────
@@ -605,6 +696,73 @@ function setupIPC(): void {
     sourceManager.disableSource(data.sourceId);
     sessionSourceStore.save(sourceManager.getConfigs());
     return { success: true };
+  });
+
+  // ── Replay IPC (WP-6A) ──────────────────────────────────────
+
+  replayStore.on('replayEvent', (data: { sessionId: string; event: AgentEvent }) => {
+    send('replayEvent', data);
+  });
+  replayStore.on('replayState', (snapshot: ReplayStateSnapshot) => {
+    send('replayState', snapshot);
+  });
+
+  ipcMain.handle('startReplay', (_event, data: { filePath: string; speed?: number }) => {
+    try {
+      const agentType: 'claude' | 'codex' = data.filePath.includes('.codex') ? 'codex' : 'claude';
+      const sessionId = replayStore.startReplay(data.filePath, agentType, data.speed);
+      const controller = replayStore.getController(sessionId);
+      return { success: true, sessionId, snapshot: controller?.getSnapshot() };
+    } catch (e) {
+      return { success: false, error: String(e) };
+    }
+  });
+
+  ipcMain.handle('replayControl', (_event, data: { sessionId: string; action: string; value?: unknown }) => {
+    const controller = replayStore.getController(data.sessionId);
+    if (!controller) {
+      return { success: false, error: 'Replay session not found' };
+    }
+
+    switch (data.action) {
+      case 'play':
+        controller.play();
+        break;
+      case 'pause':
+        controller.pause();
+        break;
+      case 'stop':
+        controller.stop();
+        break;
+      case 'seek':
+        if (typeof data.value === 'number' || typeof data.value === 'string') {
+          controller.seek(data.value);
+        }
+        break;
+      case 'speed':
+        if (typeof data.value === 'number') {
+          controller.setSpeed(data.value);
+        }
+        break;
+      case 'jumpTo':
+        if (typeof data.value === 'string') {
+          controller.jumpTo(data.value as 'next_error' | 'prev_error' | 'next_tool' | 'prev_tool');
+        }
+        break;
+      default:
+        return { success: false, error: `Unknown action: ${data.action}` };
+    }
+
+    return { success: true, snapshot: controller.getSnapshot() };
+  });
+
+  ipcMain.handle('stopReplay', (_event, data: { sessionId: string }) => {
+    replayStore.stopReplay(data.sessionId);
+    return { success: true };
+  });
+
+  ipcMain.handle('getReplaySnapshots', () => {
+    return replayStore.getReplaySnapshots();
   });
 
   // Stub handlers — no terminal management in standalone mode

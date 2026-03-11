@@ -47,6 +47,14 @@ const api = {
   disableSource(sourceId: string): Promise<SourceResult> {
     return ipcRenderer.invoke('disableSource', { sourceId }) as Promise<SourceResult>;
   },
+
+  // ── Alert management ──────────────────────────────────────
+  acknowledgeAlert(alertId: string): Promise<SourceResult> {
+    return ipcRenderer.invoke('acknowledgeAlert', { alertId }) as Promise<SourceResult>;
+  },
+  getActiveAlerts(): Promise<unknown[]> {
+    return ipcRenderer.invoke('getActiveAlerts') as Promise<unknown[]>;
+  },
 };
 
 contextBridge.exposeInMainWorld('electronAPI', api);
