@@ -3,14 +3,19 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { loadCharacterSprites, loadFloorTiles, loadWallTiles, loadFurnitureAssets } from './assetLoader.js';
-import { AgentDiscovery } from './agentDiscovery.js';
 import { startFileWatching, stopFileWatching, readNewLines } from './fileWatcher.js';
 import { createTray } from './tray.js';
 import { setupAutoUpdater, quitAndInstall, openReleaseUrl } from './autoUpdater.js';
+import { SessionRegistry } from './discovery/sessionRegistry.js';
+import type { SessionRecord } from './discovery/sessionRegistry.js';
+import { SessionSourceManager } from './discovery/sessionSourceManager.js';
+import * as sessionSourceStore from './persistence/sessionSourceStore.js';
+import { DISCOVERY_SCAN_INTERVAL_MS } from './constants.js';
 import type { AgentState, IpcBridge } from './types.js';
 
 let mainWindow: BrowserWindow | null = null;
-let discovery: AgentDiscovery | null = null;
+let registry: SessionRegistry | null = null;
+let sourceManager: SessionSourceManager | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
 
@@ -22,6 +27,11 @@ const fileWatchers = new Map<number, fs.FSWatcher>();
 const pollingTimers = new Map<number, ReturnType<typeof setInterval>>();
 const waitingTimers = new Map<number, ReturnType<typeof setTimeout>>();
 const permissionTimers = new Map<number, ReturnType<typeof setTimeout>>();
+
+// Bridge between session UUIDs and numeric agent IDs (preserves existing IPC contract)
+const agents = new Map<number, AgentState>();
+const sessionToAgentId = new Map<string, number>();
+let nextAgentId = 1;
 
 interface Settings {
   soundEnabled: boolean;
@@ -158,40 +168,76 @@ function createWindow(): BrowserWindow {
 }
 
 function startDiscovery(): void {
-  discovery = new AgentDiscovery({
-    onAgentDiscovered: (agent: AgentState) => {
-      console.log(`[Pixel Agents] Sending agentCreated for agent ${agent.id}`);
-      send('agentCreated', { id: agent.id, agentType: agent.agentType });
+  registry = new SessionRegistry();
+  sourceManager = new SessionSourceManager(registry);
 
-      // Start watching this agent's JSONL file
-      const agents = discovery!.getAgents();
-      startFileWatching(
-        agent.id, agent.jsonlFile,
-        agents, fileWatchers, pollingTimers, waitingTimers, permissionTimers,
-        bridge,
-      );
+  // When a session is registered, create an AgentState and start watching
+  registry.on('session-registered', (record: SessionRecord) => {
+    const agentId = nextAgentId++;
+    sessionToAgentId.set(record.sessionId, agentId);
 
-      // Do an initial read to catch up on any recent activity
-      readNewLines(agent.id, agents, waitingTimers, permissionTimers, bridge);
-    },
-    onAgentDormant: (agentId: number) => {
-      console.log(`[Pixel Agents] Agent ${agentId} went dormant`);
-      stopFileWatching(agentId, fileWatchers, pollingTimers, waitingTimers, permissionTimers);
-      send('agentClosed', { id: agentId });
-    },
+    const agent: AgentState = {
+      id: agentId,
+      agentType: record.agentType,
+      projectDir: path.dirname(record.filePath),
+      jsonlFile: record.filePath,
+      fileOffset: fs.statSync(record.filePath).size, // Start from end
+      lineBuffer: '',
+      activeToolIds: new Set(),
+      activeToolStatuses: new Map(),
+      activeToolNames: new Map(),
+      activeSubagentToolIds: new Map(),
+      activeSubagentToolNames: new Map(),
+      isWaiting: false,
+      permissionSent: false,
+      hadToolsInTurn: false,
+    };
+    agents.set(agentId, agent);
+
+    console.log(`[Pixel Agents] Sending agentCreated for agent ${agentId} (session ${record.sessionId})`);
+    send('agentCreated', { id: agentId, agentType: record.agentType });
+
+    startFileWatching(
+      agentId, record.filePath,
+      agents, fileWatchers, pollingTimers, waitingTimers, permissionTimers,
+      bridge,
+    );
+
+    readNewLines(agentId, agents, waitingTimers, permissionTimers, bridge);
   });
-  discovery.start();
+
+  // When a session is removed, stop watching and notify renderer
+  registry.on('session-removed', (record: SessionRecord) => {
+    const agentId = sessionToAgentId.get(record.sessionId);
+    if (agentId === undefined) return;
+
+    console.log(`[Pixel Agents] Agent ${agentId} session removed`);
+    stopFileWatching(agentId, fileWatchers, pollingTimers, waitingTimers, permissionTimers);
+    agents.delete(agentId);
+    sessionToAgentId.delete(record.sessionId);
+    send('agentClosed', { id: agentId });
+  });
+
+  // Load source configs and register them
+  const configs = sessionSourceStore.load();
+  for (const config of configs) {
+    sourceManager.addSource(config);
+  }
 }
 
 function stopDiscovery(): void {
-  if (discovery) {
-    // Stop all file watchers
-    for (const agentId of discovery.getAgentIds()) {
-      stopFileWatching(agentId, fileWatchers, pollingTimers, waitingTimers, permissionTimers);
-    }
-    discovery.stop();
-    discovery = null;
+  if (sourceManager) {
+    sourceManager.stopAll();
+    sourceManager = null;
   }
+  // Stop all file watchers
+  for (const agentId of agents.keys()) {
+    stopFileWatching(agentId, fileWatchers, pollingTimers, waitingTimers, permissionTimers);
+  }
+  agents.clear();
+  sessionToAgentId.clear();
+  registry?.removeAllListeners();
+  registry = null;
 }
 
 function setupIPC(): void {
@@ -294,25 +340,31 @@ function setupIPC(): void {
   });
 
   ipcMain.on('requestDiagnostics', () => {
-    const discDiag = discovery
-      ? discovery.getDiagnostics()
-      : { knownFiles: [], agentCount: 0, scanInterval: 0, agents: [] };
+    const knownFiles = registry
+      ? registry.getAllSessions().map((s) => s.filePath)
+      : [];
+
+    const agentDiags = [...agents.values()].map((a) => ({
+      id: a.id,
+      agentType: a.agentType,
+      jsonlFile: a.jsonlFile,
+      fileOffset: a.fileOffset,
+      bufferSize: a.lineBuffer.length,
+    }));
 
     const activeWatchers = [...fileWatchers.keys()].map(String);
     const bufferSizes: Record<string, number> = {};
-    if (discovery) {
-      for (const [id, agent] of discovery.getAgents()) {
-        bufferSizes[String(id)] = agent.lineBuffer.length;
-      }
+    for (const [id, agent] of agents) {
+      bufferSizes[String(id)] = agent.lineBuffer.length;
     }
 
     const mem = process.memoryUsage();
     send('diagnosticsDump', {
       discovery: {
-        knownFiles: discDiag.knownFiles,
-        agentCount: discDiag.agentCount,
-        scanInterval: discDiag.scanInterval,
-        agents: discDiag.agents,
+        knownFiles,
+        agentCount: agents.size,
+        scanInterval: DISCOVERY_SCAN_INTERVAL_MS,
+        agents: agentDiags,
       },
       fileWatcher: {
         activeWatchers,
