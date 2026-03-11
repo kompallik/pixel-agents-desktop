@@ -3,15 +3,20 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { loadCharacterSprites, loadFloorTiles, loadWallTiles, loadFurnitureAssets } from './assetLoader.js';
-import { startFileWatching, stopFileWatching, readNewLines } from './fileWatcher.js';
 import { createTray } from './tray.js';
 import { setupAutoUpdater, quitAndInstall, openReleaseUrl } from './autoUpdater.js';
 import { SessionRegistry } from './discovery/sessionRegistry.js';
 import type { SessionRecord } from './discovery/sessionRegistry.js';
 import { SessionSourceManager } from './discovery/sessionSourceManager.js';
 import * as sessionSourceStore from './persistence/sessionSourceStore.js';
-import { DISCOVERY_SCAN_INTERVAL_MS } from './constants.js';
-import type { AgentState, IpcBridge } from './types.js';
+import { validateJsonlFile, validateDirectory } from './discovery/pathValidator.js';
+import { DISCOVERY_SCAN_INTERVAL_MS, PERMISSION_TIMER_DELAY_MS } from './constants.js';
+import type { SessionSourceConfig } from './discovery/sessionSource.js';
+import { SessionStore } from './domain/sessionStore.js';
+import { createInitialSessionState } from './domain/sessionState.js';
+import type { SessionViewState } from './domain/sessionState.js';
+import { IngestionController } from './ingest/ingestionController.js';
+import type { AgentEvent } from './domain/events.js';
 
 let mainWindow: BrowserWindow | null = null;
 let registry: SessionRegistry | null = null;
@@ -22,16 +27,17 @@ let isQuitting = false;
 const CONFIG_DIR = '.pixel-agents';
 const SETTINGS_FILE = 'settings.json';
 
-// Agent management state
-const fileWatchers = new Map<number, fs.FSWatcher>();
-const pollingTimers = new Map<number, ReturnType<typeof setInterval>>();
-const waitingTimers = new Map<number, ReturnType<typeof setTimeout>>();
-const permissionTimers = new Map<number, ReturnType<typeof setTimeout>>();
-
 // Bridge between session UUIDs and numeric agent IDs (preserves existing IPC contract)
-const agents = new Map<number, AgentState>();
 const sessionToAgentId = new Map<string, number>();
 let nextAgentId = 1;
+
+// Domain event pipeline (WP-2A/2B)
+const domainStore = new SessionStore();
+const ingestionControllers = new Map<string, IngestionController>();
+
+// Permission timer state per agent (backward compat for renderer permission detection)
+const permissionTimers = new Map<number, ReturnType<typeof setTimeout>>();
+const PERMISSION_EXEMPT_TOOLS = new Set(['Task', 'AskUserQuestion']);
 
 interface Settings {
   soundEnabled: boolean;
@@ -112,12 +118,6 @@ function send(channel: string, data?: unknown): void {
   mainWindow?.webContents.send(channel, data ?? {});
 }
 
-// IPC bridge for file watcher and transcript parser
-const bridge: IpcBridge = {
-  send(channel: string, data: unknown): void {
-    send(channel, data);
-  },
-};
 
 function getIconPath(): string | undefined {
   const packaged = app.isPackaged
@@ -171,17 +171,26 @@ function startDiscovery(): void {
   registry = new SessionRegistry();
   sourceManager = new SessionSourceManager(registry);
 
+  // Wire domain store state changes to renderer
+  domainStore.on('state-changed', (sessions: SessionViewState[]) => {
+    send('sessionStateUpdate', sessions);
+  });
+
   // When a session is registered, create an AgentState and start watching
   registry.on('session-registered', (record: SessionRecord) => {
     const agentId = nextAgentId++;
     sessionToAgentId.set(record.sessionId, agentId);
+
+    // 'replay' starts from beginning, 'tail'/'snapshot' start from end
+    const stat = fs.statSync(record.filePath);
+    const fileOffset = record.importMode === 'replay' ? 0 : stat.size;
 
     const agent: AgentState = {
       id: agentId,
       agentType: record.agentType,
       projectDir: path.dirname(record.filePath),
       jsonlFile: record.filePath,
-      fileOffset: fs.statSync(record.filePath).size, // Start from end
+      fileOffset,
       lineBuffer: '',
       activeToolIds: new Set(),
       activeToolStatuses: new Map(),
@@ -197,13 +206,39 @@ function startDiscovery(): void {
     console.log(`[Pixel Agents] Sending agentCreated for agent ${agentId} (session ${record.sessionId})`);
     send('agentCreated', { id: agentId, agentType: record.agentType });
 
+    // Legacy pipeline (kept for backward compat until Phase 4)
     startFileWatching(
       agentId, record.filePath,
       agents, fileWatchers, pollingTimers, waitingTimers, permissionTimers,
       bridge,
     );
-
     readNewLines(agentId, agents, waitingTimers, permissionTimers, bridge);
+
+    // New domain event pipeline
+    const sessionState = createInitialSessionState(
+      record.sessionId,
+      agentId,
+      record.sourceId,
+      record.agentType,
+      record.filePath,
+    );
+    sessionState.projectName = record.projectName;
+    sessionState.runMode = record.importMode === 'replay' ? 'replay' : 'live';
+    domainStore.registerSession(sessionState);
+
+    const controller = new IngestionController({
+      sessionId: record.sessionId,
+      filePath: record.filePath,
+      agentType: record.agentType,
+      mode: record.importMode === 'replay' ? 'replay' : 'live',
+      store: domainStore,
+      startOffset: fileOffset,
+      onEvent: (event: AgentEvent) => {
+        emitLegacyFromDomainEvent(agentId, event);
+      },
+    });
+    ingestionControllers.set(record.sessionId, controller);
+    controller.start();
   });
 
   // When a session is removed, stop watching and notify renderer
@@ -216,12 +251,70 @@ function startDiscovery(): void {
     agents.delete(agentId);
     sessionToAgentId.delete(record.sessionId);
     send('agentClosed', { id: agentId });
+
+    // Clean up domain pipeline
+    const controller = ingestionControllers.get(record.sessionId);
+    if (controller) {
+      controller.destroy();
+      ingestionControllers.delete(record.sessionId);
+    }
+    domainStore.removeSession(record.sessionId);
   });
 
   // Load source configs and register them
   const configs = sessionSourceStore.load();
   for (const config of configs) {
     sourceManager.addSource(config);
+  }
+}
+
+/** Backward compatibility: emit legacy IPC messages from domain events */
+function emitLegacyFromDomainEvent(agentId: number, event: AgentEvent): void {
+  switch (event.type) {
+    case 'tool_started':
+      if (!event.parentToolId) {
+        send('agentToolStart', { id: agentId, toolId: event.toolId, status: event.status });
+      } else {
+        send('subagentToolStart', {
+          id: agentId,
+          parentToolId: event.parentToolId,
+          toolId: event.toolId,
+          status: event.status,
+        });
+      }
+      break;
+    case 'tool_completed':
+      if (!event.parentToolId) {
+        send('agentToolDone', { id: agentId, toolId: event.toolId });
+      } else {
+        send('subagentToolDone', {
+          id: agentId,
+          parentToolId: event.parentToolId,
+          toolId: event.toolId,
+        });
+      }
+      break;
+    case 'waiting_for_input':
+      send('agentStatus', { id: agentId, status: 'waiting' });
+      break;
+    case 'session_attached':
+      send('agentStatus', { id: agentId, status: 'active' });
+      break;
+    case 'permission_requested':
+      send('agentToolPermission', { id: agentId });
+      break;
+    case 'permission_cleared':
+      send('agentToolPermissionClear', { id: agentId });
+      break;
+    case 'turn_completed':
+      send('agentToolsClear', { id: agentId });
+      send('agentStatus', { id: agentId, status: 'waiting' });
+      break;
+    case 'session_dormant':
+      send('agentClosed', { id: agentId });
+      break;
+    default:
+      break;
   }
 }
 
@@ -234,8 +327,14 @@ function stopDiscovery(): void {
   for (const agentId of agents.keys()) {
     stopFileWatching(agentId, fileWatchers, pollingTimers, waitingTimers, permissionTimers);
   }
+  // Stop all ingestion controllers
+  for (const controller of ingestionControllers.values()) {
+    controller.destroy();
+  }
+  ingestionControllers.clear();
   agents.clear();
   sessionToAgentId.clear();
+  domainStore.removeAllListeners();
   registry?.removeAllListeners();
   registry = null;
 }
@@ -358,6 +457,15 @@ function setupIPC(): void {
       bufferSizes[String(id)] = agent.lineBuffer.length;
     }
 
+    const domainSessions = domainStore.getAllSessions().map((s) => ({
+      sessionId: s.sessionId,
+      agentId: s.agentId,
+      status: s.status.state,
+      eventCount: s.eventCount,
+      activeTools: s.activeTools.length,
+      runMode: s.runMode,
+    }));
+
     const mem = process.memoryUsage();
     send('diagnosticsDump', {
       discovery: {
@@ -370,12 +478,127 @@ function setupIPC(): void {
         activeWatchers,
         bufferSizes,
       },
+      domainStore: {
+        sessionCount: domainSessions.length,
+        sessions: domainSessions,
+        ingestionControllers: ingestionControllers.size,
+      },
       memory: {
         heapUsed: mem.heapUsed,
         heapTotal: mem.heapTotal,
         rss: mem.rss,
       },
     });
+  });
+
+  // ── Source management IPC ──────────────────────────────────────
+
+  ipcMain.handle('addManualFile', (_event, data: { filePath: string; label?: string; importMode?: string }) => {
+    const validation = validateJsonlFile(data.filePath);
+    if (!validation.valid) {
+      return { success: false, error: validation.error };
+    }
+
+    if (!sourceManager) {
+      return { success: false, error: 'Source manager not initialized' };
+    }
+
+    // Check for duplicate path across existing sources
+    const existing = sourceManager.getConfigs();
+    if (existing.some((c) => c.path === data.filePath)) {
+      return { success: false, error: 'This file is already added as a source' };
+    }
+
+    const importMode = (data.importMode === 'replay' || data.importMode === 'snapshot')
+      ? data.importMode
+      : 'tail' as const;
+
+    const config: SessionSourceConfig = {
+      id: `manual_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      kind: 'manual_file',
+      label: data.label ?? path.basename(data.filePath),
+      enabled: true,
+      importMode,
+      path: data.filePath,
+    };
+
+    sourceManager.addSource(config);
+    sessionSourceStore.save(sourceManager.getConfigs());
+    return { success: true, config };
+  });
+
+  ipcMain.handle('addWatchedDirectory', (_event, data: { directory: string; label?: string; glob?: string; importMode?: string }) => {
+    const dirValidation = validateDirectory(data.directory);
+    if (!dirValidation.valid) {
+      return { success: false, error: dirValidation.error };
+    }
+
+    if (!sourceManager) {
+      return { success: false, error: 'Source manager not initialized' };
+    }
+
+    const existing = sourceManager.getConfigs();
+    if (existing.some((c) => c.directory === data.directory)) {
+      return { success: false, error: 'This directory is already being watched' };
+    }
+
+    const importMode = (data.importMode === 'replay' || data.importMode === 'snapshot')
+      ? data.importMode
+      : 'tail' as const;
+
+    const config: SessionSourceConfig = {
+      id: `watched_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      kind: 'watched_directory',
+      label: data.label ?? path.basename(data.directory),
+      enabled: true,
+      importMode,
+      directory: data.directory,
+      glob: data.glob ?? '*.jsonl',
+    };
+
+    sourceManager.addSource(config);
+    sessionSourceStore.save(sourceManager.getConfigs());
+    return { success: true, config };
+  });
+
+  ipcMain.handle('removeSource', (_event, data: { sourceId: string }) => {
+    if (!sourceManager) {
+      return { success: false, error: 'Source manager not initialized' };
+    }
+
+    // Don't allow removing auto sources
+    if (data.sourceId === 'auto_claude' || data.sourceId === 'auto_codex') {
+      return { success: false, error: 'Cannot remove built-in auto-scan sources' };
+    }
+
+    sourceManager.removeSource(data.sourceId);
+    sessionSourceStore.save(sourceManager.getConfigs());
+    return { success: true };
+  });
+
+  ipcMain.handle('getSourceConfigs', () => {
+    if (!sourceManager) {
+      return [];
+    }
+    return sourceManager.getConfigs();
+  });
+
+  ipcMain.handle('enableSource', (_event, data: { sourceId: string }) => {
+    if (!sourceManager) {
+      return { success: false, error: 'Source manager not initialized' };
+    }
+    sourceManager.enableSource(data.sourceId);
+    sessionSourceStore.save(sourceManager.getConfigs());
+    return { success: true };
+  });
+
+  ipcMain.handle('disableSource', (_event, data: { sourceId: string }) => {
+    if (!sourceManager) {
+      return { success: false, error: 'Source manager not initialized' };
+    }
+    sourceManager.disableSource(data.sourceId);
+    sessionSourceStore.save(sourceManager.getConfigs());
+    return { success: true };
   });
 
   // Stub handlers — no terminal management in standalone mode

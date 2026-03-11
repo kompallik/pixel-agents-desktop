@@ -3,6 +3,8 @@ import { BaseSessionSource } from './sessionSource.js';
 import type { SessionRegistry } from './sessionRegistry.js';
 import { AutoScanClaudeSource } from './sessionSources/autoScanClaudeSource.js';
 import { AutoScanCodexSource } from './sessionSources/autoScanCodexSource.js';
+import { ManualPathSource } from './sessionSources/manualPathSource.js';
+import { WatchedDirectorySource } from './sessionSources/watchedDirectorySource.js';
 
 export class SessionSourceManager {
   private sources = new Map<string, BaseSessionSource>();
@@ -47,6 +49,7 @@ export class SessionSourceManager {
   enableSource(id: string): void {
     const source = this.sources.get(id);
     if (source) {
+      (source.config as SessionSourceConfig).enabled = true;
       source.start();
     }
   }
@@ -54,6 +57,7 @@ export class SessionSourceManager {
   disableSource(id: string): void {
     const source = this.sources.get(id);
     if (source) {
+      (source.config as SessionSourceConfig).enabled = false;
       source.stop();
     }
   }
@@ -83,9 +87,9 @@ export class SessionSourceManager {
       case 'auto_codex':
         return new AutoScanCodexSource(config);
       case 'manual_file':
+        return new ManualPathSource(config);
       case 'watched_directory':
-        // Will be implemented in WP-1B
-        return null;
+        return new WatchedDirectorySource(config);
       default:
         return null;
     }
