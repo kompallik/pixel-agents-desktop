@@ -358,7 +358,8 @@ function App() {
       {!showSidebar && (
         <button
           onClick={() => setShowSidebar(true)}
-          style={{ position: 'absolute', top: 8, left: 8, zIndex: 45, padding: '3px 8px', fontSize: 14, background: 'rgba(30, 30, 46, 0.85)', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: 0, color: 'rgba(255, 255, 255, 0.6)', cursor: 'pointer' }}
+          className="dashboard-toggle-btn"
+          style={{ top: 8, left: 8 }}
           title="Open sidebar (Cmd+2)"
         >
           Sessions
@@ -367,7 +368,8 @@ function App() {
       {!showInspector && (
         <button
           onClick={() => setShowInspector(true)}
-          style={{ position: 'absolute', top: 8, right: 8, zIndex: 45, padding: '3px 8px', fontSize: 14, background: 'rgba(30, 30, 46, 0.85)', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: 0, color: 'rgba(255, 255, 255, 0.6)', cursor: 'pointer' }}
+          className="dashboard-toggle-btn"
+          style={{ top: 8, right: 8 }}
           title="Open inspector (Cmd+3)"
         >
           Inspector
@@ -380,9 +382,9 @@ function App() {
 
   const sidebarContent = (
     <>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 8px', borderBottom: '1px solid rgba(255, 255, 255, 0.06)', flexShrink: 0 }}>
-        <span style={{ fontSize: 16, fontWeight: 600, color: 'rgba(255, 255, 255, 0.7)' }}>Sessions</span>
-        <button onClick={() => setShowSidebar(false)} style={{ background: 'none', border: 'none', color: 'rgba(255, 255, 255, 0.4)', cursor: 'pointer', fontSize: 14, padding: '0 4px' }} title="Close sidebar (Cmd+2)">x</button>
+      <div className="dashboard-panel-header">
+        <span className="dashboard-panel-title">Sessions</span>
+        <button onClick={() => setShowSidebar(false)} className="dashboard-panel-close" title="Close sidebar (Cmd+2)">x</button>
       </div>
       <div style={{ flex: 1, overflow: 'hidden' }}>
         <SessionList />
@@ -392,9 +394,9 @@ function App() {
 
   const inspectorContent = (
     <>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 8px', borderBottom: '1px solid rgba(255, 255, 255, 0.06)', flexShrink: 0 }}>
-        <span style={{ fontSize: 16, fontWeight: 600, color: 'rgba(255, 255, 255, 0.7)' }}>Inspector</span>
-        <button onClick={() => setShowInspector(false)} style={{ background: 'none', border: 'none', color: 'rgba(255, 255, 255, 0.4)', cursor: 'pointer', fontSize: 14, padding: '0 4px' }} title="Close inspector (Cmd+3)">x</button>
+      <div className="dashboard-panel-header">
+        <span className="dashboard-panel-title">Inspector</span>
+        <button onClick={() => setShowInspector(false)} className="dashboard-panel-close" title="Close inspector (Cmd+3)">x</button>
       </div>
       <div style={{ flex: 1, overflow: 'auto' }}>
         <InspectorPanel />

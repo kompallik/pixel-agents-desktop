@@ -1,9 +1,11 @@
 import { useState, useMemo, useCallback } from 'react'
 import { useSessionStore } from '../stores/sessionStore.js'
+import { useAlertStore, getAlertsBySession } from '../stores/alertStore.js'
 import { useFilteredSessions } from '../hooks/useSessions.js'
 import type { SessionViewState, SessionStatus } from '../types/domainTypes.js'
 import { StatusChip } from './StatusChip.js'
 import { HealthIndicator } from './HealthIndicator.js'
+import { AlertBadge } from './AlertBadge.js'
 import { FilterBar } from './FilterBar.js'
 import type { SortMode } from './FilterBar.js'
 import { TopMetricsBar } from './TopMetricsBar.js'
@@ -33,58 +35,35 @@ interface SessionRowProps {
 }
 
 function SessionRow({ session, isSelected, onSelect }: SessionRowProps) {
+  const alerts = useAlertStore((s) => getAlertsBySession(s.alerts, session.sessionId))
   const displayName = session.projectName ?? truncatePath(session.filePath)
 
   return (
     <button
       onClick={() => onSelect(session.sessionId)}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 6,
-        width: '100%',
-        padding: '5px 8px',
-        background: isSelected ? 'rgba(90, 140, 255, 0.15)' : 'transparent',
-        border: 'none',
-        borderLeft: isSelected ? '3px solid #4a9eff' : '3px solid transparent',
-        borderRadius: 0,
-        cursor: 'pointer',
-        textAlign: 'left',
-        color: 'rgba(255, 255, 255, 0.8)',
-      }}
+      className={`session-item${isSelected ? ' selected' : ''}`}
     >
-      {/* Agent color dot */}
       <span
-        style={{
-          width: 8,
-          height: 8,
-          borderRadius: '50%',
-          background: getAgentColor(session.agentId),
-          flexShrink: 0,
-        }}
+        className="session-dot"
+        style={{ background: getAgentColor(session.agentId) }}
       />
-      {/* Name + path */}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div
-          style={{
-            fontSize: '16px',
-            fontWeight: 500,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-          title={session.filePath}
-        >
+        <div className="session-name" title={session.filePath}>
+          {session.runMode === 'replay' && (
+            <span style={{ fontSize: '10px', marginRight: 4, opacity: 0.7 }} title="Replay session">R</span>
+          )}
           {displayName}
         </div>
-        <div style={{ fontSize: '12px', opacity: 0.45, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <div className="session-meta">
           {session.agentType} #{session.agentId}
-          {session.branch ? ` · ${session.branch}` : ''}
+          {session.branch ? ` \u00b7 ${session.branch}` : ''}
         </div>
       </div>
-      {/* Status + health */}
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3, flexShrink: 0 }}>
-        <StatusChip status={session.status} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <AlertBadge alerts={alerts} />
+          <StatusChip status={session.status} />
+        </div>
         <HealthIndicator score={session.healthScore} />
       </div>
     </button>
@@ -96,9 +75,19 @@ export function SessionList() {
   const selectSession = useSessionStore((s) => s.selectSession)
   const selectedSessionId = useSessionStore((s) => s.selectedSessionId)
   const sessions = useSessionStore((s) => s.sessions)
+  const alerts = useAlertStore((s) => s.alerts)
   const filtered = useFilteredSessions()
 
   const allSessions = useMemo(() => Array.from(sessions.values()), [sessions])
+
+  const alertCountBySession = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const a of alerts.values()) {
+      if (a.acknowledgedAt) continue
+      counts.set(a.sessionId, (counts.get(a.sessionId) ?? 0) + 1)
+    }
+    return counts
+  }, [alerts])
 
   const sorted = useMemo(() => {
     const items = [...filtered]
@@ -108,6 +97,14 @@ export function SessionList() {
         break
       case 'activity':
         items.sort((a, b) => (b.lastEventAt ?? '').localeCompare(a.lastEventAt ?? ''))
+        break
+      case 'alerts':
+        items.sort((a, b) => {
+          const aAlerts = alertCountBySession.get(a.sessionId) ?? 0
+          const bAlerts = alertCountBySession.get(b.sessionId) ?? 0
+          if (aAlerts !== bAlerts) return bAlerts - aAlerts
+          return (b.lastEventAt ?? '').localeCompare(a.lastEventAt ?? '')
+        })
         break
       case 'attention':
       default:
@@ -120,21 +117,21 @@ export function SessionList() {
         break
     }
     return items
-  }, [filtered, sortMode])
+  }, [filtered, sortMode, alertCountBySession])
 
   const handleSelect = useCallback((sessionId: string) => {
     selectSession(selectedSessionId === sessionId ? null : sessionId)
   }, [selectSession, selectedSessionId])
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <TopMetricsBar />
-      <FilterBar sessions={allSessions} sortMode={sortMode} onSortChange={setSortMode} />
-      <div style={{ flex: 1, overflow: 'auto', marginTop: 4 }}>
+    <div className="session-list">
+      <div className="session-list-header">
+        <TopMetricsBar />
+        <FilterBar sessions={allSessions} sortMode={sortMode} onSortChange={setSortMode} />
+      </div>
+      <div className="session-list-items">
         {sorted.length === 0 && (
-          <div style={{ padding: '12px 8px', fontSize: '14px', color: 'rgba(255, 255, 255, 0.35)', textAlign: 'center' }}>
-            No sessions found
-          </div>
+          <div className="session-empty">No sessions found</div>
         )}
         {sorted.map((session) => (
           <SessionRow

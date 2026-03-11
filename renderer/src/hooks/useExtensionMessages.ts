@@ -10,7 +10,9 @@ import { setCharacterTemplates } from '../office/sprites/spriteData.js'
 import { api, onSessionStateUpdate } from '../electronApi.js'
 import { playDoneSound, setSoundEnabled } from '../notificationSound.js'
 import { useSessionStore } from '../stores/sessionStore.js'
-import type { SessionViewState } from '../types/domainTypes.js'
+import { useAlertStore } from '../stores/alertStore.js'
+import { useReplayStore } from '../stores/replayStore.js'
+import type { SessionViewState, Alert, ReplayStatus, AgentEvent } from '../types/domainTypes.js'
 
 export interface SubagentCharacter {
   id: number
@@ -392,9 +394,38 @@ export function useExtensionMessages(
         handler({ data: { type: channel, ...(data as Record<string, unknown>) } } as MessageEvent)
       })
     )
+    // Subscribe to alerts updates
+    const unsubAlerts = api.on('alertsUpdate', (...args: unknown[]) => {
+      const alerts = args[0] as Alert[]
+      useAlertStore.getState().setAlerts(alerts)
+    })
+
+    // Subscribe to replay state updates
+    const unsubReplayState = api.onReplayState((...args: unknown[]) => {
+      const snapshot = args[0] as { sessionId: string; playbackState: string; currentIndex: number; totalEvents: number; currentTimestamp: string | null; speed: number }
+      const status: ReplayStatus = {
+        sessionId: snapshot.sessionId,
+        state: snapshot.playbackState as ReplayStatus['state'],
+        currentIndex: snapshot.currentIndex,
+        totalEvents: snapshot.totalEvents,
+        currentTimestamp: snapshot.currentTimestamp,
+        speed: snapshot.speed,
+      }
+      useReplayStore.getState().updateStatus(status)
+    })
+
+    // Subscribe to replay events (for timeline markers)
+    const unsubReplayEvent = api.onReplayEvent((...args: unknown[]) => {
+      const event = args[0] as AgentEvent
+      useReplayStore.getState().addEvent(event)
+    })
+
     api.send('webviewReady')
     return () => {
       unsubSessionState()
+      unsubAlerts()
+      unsubReplayState()
+      unsubReplayEvent()
       cleanups.forEach(cleanup => cleanup())
     }
   }, [getOfficeState])

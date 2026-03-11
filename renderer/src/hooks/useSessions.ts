@@ -1,9 +1,22 @@
 import { useMemo } from 'react';
 import { useSessionStore } from '../stores/sessionStore.js';
-import type { SessionViewState, SessionStatus } from '../types/domainTypes.js';
+import { useAlertStore, getAlertsBySession } from '../stores/alertStore.js';
+import type { SessionViewState, SessionStatus, Alert } from '../types/domainTypes.js';
 
 const INACTIVE_STATUSES: ReadonlySet<SessionStatus> = new Set(['dormant', 'completed']);
 const ATTENTION_STATUSES: ReadonlySet<SessionStatus> = new Set(['stalled', 'errored', 'waiting_permission']);
+
+const SEVERITY_RANK: Record<string, number> = { error: 0, warning: 1, info: 2 };
+
+function alertSortRank(alerts: Alert[]): number {
+  if (alerts.length === 0) return 3;
+  let best = 3;
+  for (const a of alerts) {
+    const r = SEVERITY_RANK[a.severity] ?? 3;
+    if (r < best) best = r;
+  }
+  return best;
+}
 
 function sessionsArray(sessions: Map<string, SessionViewState>): SessionViewState[] {
   return Array.from(sessions.values());
@@ -49,6 +62,7 @@ export function useFilteredSessions(): SessionViewState[] {
   const sessions = useSessionStore((s) => s.sessions);
   const filterStatus = useSessionStore((s) => s.filterStatus);
   const searchQuery = useSessionStore((s) => s.searchQuery);
+  const allAlerts = useAlertStore((s) => s.alerts);
 
   return useMemo(() => {
     let result = sessionsArray(sessions);
@@ -67,8 +81,13 @@ export function useFilteredSessions(): SessionViewState[] {
       );
     }
 
-    // Sort: attention-needing first, then by lastEventAt descending
+    // Sort: sessions with alerts (error > warning > info) first,
+    // then attention-needing, then by lastEventAt descending
     result.sort((a, b) => {
+      const aAlertRank = alertSortRank(getAlertsBySession(allAlerts, a.sessionId));
+      const bAlertRank = alertSortRank(getAlertsBySession(allAlerts, b.sessionId));
+      if (aAlertRank !== bAlertRank) return aAlertRank - bAlertRank;
+
       const aAttn = ATTENTION_STATUSES.has(a.status.state) ? 0 : 1;
       const bAttn = ATTENTION_STATUSES.has(b.status.state) ? 0 : 1;
       if (aAttn !== bAttn) return aAttn - bAttn;
@@ -78,5 +97,5 @@ export function useFilteredSessions(): SessionViewState[] {
     });
 
     return result;
-  }, [sessions, filterStatus, searchQuery]);
+  }, [sessions, filterStatus, searchQuery, allAlerts]);
 }

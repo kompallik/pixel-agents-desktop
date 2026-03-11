@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { api } from '../electronApi.js'
 import { SettingsModal } from './SettingsModal.js'
 import type { SettingsTab } from './SettingsModal.js'
 
@@ -85,6 +86,23 @@ export function BottomToolbar({
         title="Add session source"
       >
         + Session
+      </button>
+      <button
+        onClick={async () => {
+          const result = await api.invoke('dialog:openFile', { filters: [{ name: 'JSONL', extensions: ['jsonl'] }] }) as string | null
+          if (result) {
+            api.startReplay(result, 1)
+          }
+        }}
+        onMouseEnter={() => setHovered('replay')}
+        onMouseLeave={() => setHovered(null)}
+        style={{
+          ...btnBase,
+          background: hovered === 'replay' ? 'var(--pixel-btn-hover-bg)' : btnBase.background,
+        }}
+        title="Replay a JSONL transcript"
+      >
+        Replay
       </button>
       <div style={{ position: 'relative' }}>
         <button

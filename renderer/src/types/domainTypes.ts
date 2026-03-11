@@ -51,6 +51,55 @@ export interface ToolInfo {
   completedAt?: string;
 }
 
+// ── Alert types (from src/domain/alertEngine.ts) ──
+
+export type AlertRule =
+  | 'stale_session'
+  | 'failure_burst'
+  | 'permission_loop'
+  | 'unreadable_file'
+  | 'parser_error'
+  | 'duplicate_worktree'
+  | 'child_active_parent_silent';
+
+export type AlertSeverity = 'info' | 'warning' | 'error';
+
+export interface Alert {
+  id: string;
+  sessionId: string;
+  rule: AlertRule;
+  severity: AlertSeverity;
+  message: string;
+  details: string;
+  createdAt: string;
+  acknowledgedAt?: string;
+}
+
+// ── Replay types (from src/ingest/replayController.ts) ──
+
+export type PlaybackState = 'playing' | 'paused' | 'seeking' | 'stopped';
+export type ReplaySpeed = 1 | 2 | 5 | 10 | 20;
+export type JumpTarget = 'next_error' | 'prev_error' | 'next_tool' | 'prev_tool';
+
+export interface ReplayStatus {
+  sessionId: string;
+  state: PlaybackState;
+  currentIndex: number;
+  totalEvents: number;
+  currentTimestamp: string | null;
+  speed: number;
+}
+
+export interface AgentEvent {
+  id: string;
+  sessionId: string;
+  timestamp: string;
+  type: string;
+  toolName?: string;
+}
+
+// ── Session view types ──
+
 export interface SessionViewState {
   sessionId: string;
   agentId: number;

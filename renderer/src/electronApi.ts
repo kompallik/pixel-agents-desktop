@@ -80,3 +80,10 @@ export function onSessionStateUpdate(callback: (sessions: import('./types/domain
     callback(args[0] as import('./types/domainTypes.js').SessionViewState[]);
   });
 }
+
+/** Typed listener for alertsUpdate IPC channel */
+export function onAlertsUpdate(callback: (alerts: import('./types/domainTypes.js').Alert[]) => void): () => void {
+  return api.on('alertsUpdate', (...args: unknown[]) => {
+    callback(args[0] as import('./types/domainTypes.js').Alert[]);
+  });
+}

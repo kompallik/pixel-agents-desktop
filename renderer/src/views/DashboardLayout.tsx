@@ -17,48 +17,23 @@ export function DashboardLayout({ sidebar, center, inspector, showSidebar, showI
 
   return (
     <div
-      style={{
-        width: '100%',
-        height: '100%',
-        display: 'grid',
-        gridTemplateColumns: `${sidebarCol} 1fr ${inspectorCol}`,
-        transition: 'grid-template-columns 0.25s ease',
-        overflow: 'hidden',
-      }}
+      className="dashboard-layout"
+      style={{ gridTemplateColumns: `${sidebarCol} 1fr ${inspectorCol}` }}
     >
-      {/* Sidebar */}
       <div
-        style={{
-          overflow: 'hidden',
-          width: showSidebar ? SIDEBAR_WIDTH : 0,
-          minWidth: 0,
-          transition: 'width 0.25s ease',
-          borderRight: showSidebar ? '1px solid rgba(255, 255, 255, 0.08)' : 'none',
-          background: 'rgba(30, 30, 46, 0.95)',
-          display: 'flex',
-          flexDirection: 'column',
-        }}
+        className={`dashboard-sidebar${showSidebar ? '' : ' collapsed'}`}
+        style={{ width: showSidebar ? SIDEBAR_WIDTH : 0 }}
       >
         {sidebar}
       </div>
 
-      {/* Center — always fills remaining space */}
-      <div style={{ overflow: 'hidden', position: 'relative', minWidth: 0 }}>
+      <div className="dashboard-center">
         {center}
       </div>
 
-      {/* Inspector */}
       <div
-        style={{
-          overflow: 'hidden',
-          width: showInspector ? INSPECTOR_WIDTH : 0,
-          minWidth: 0,
-          transition: 'width 0.25s ease',
-          borderLeft: showInspector ? '1px solid rgba(255, 255, 255, 0.08)' : 'none',
-          background: 'rgba(30, 30, 46, 0.95)',
-          display: 'flex',
-          flexDirection: 'column',
-        }}
+        className={`dashboard-inspector${showInspector ? '' : ' collapsed'}`}
+        style={{ width: showInspector ? INSPECTOR_WIDTH : 0 }}
       >
         {inspector}
       </div>
