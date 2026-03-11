@@ -11,7 +11,8 @@
     "build:main": "node esbuild.main.mjs",
     "build:renderer": "cd renderer && npm run build",
     "start": "electron .",
-    "dist": "npm run build && electron-builder"
+    "dist": "npm run build && electron-builder",
+    "test": "vitest run"
   },
   "dependencies": {
     "electron-updater": "^6.8.3",
@@ -24,6 +25,7 @@
     "electron": "^35.0.0",
     "electron-builder": "^26.0.0",
     "esbuild": "^0.27.0",
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "vitest": "^4.0.18"
   }
 }

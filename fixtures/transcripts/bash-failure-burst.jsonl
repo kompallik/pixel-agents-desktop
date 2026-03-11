@@ -1,0 +1,10 @@
+{"type":"assistant","message":{"id":"msg_01","role":"assistant","content":[{"type":"tool_use","id":"toolu_b1","name":"Bash","input":{"command":"npm test"}}]},"uuid":"b1","timestamp":"2026-03-10T10:00:00Z"}
+{"type":"user","message":{"id":"msg_02","role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_b1","content":"Error: tests failed with exit code 1","is_error":true}]},"uuid":"b2","timestamp":"2026-03-10T10:00:01Z"}
+{"type":"assistant","message":{"id":"msg_03","role":"assistant","content":[{"type":"tool_use","id":"toolu_b2","name":"Bash","input":{"command":"npm run lint"}}]},"uuid":"b3","timestamp":"2026-03-10T10:00:02Z"}
+{"type":"user","message":{"id":"msg_04","role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_b2","content":"Error: lint failed","is_error":true}]},"uuid":"b4","timestamp":"2026-03-10T10:00:03Z"}
+{"type":"assistant","message":{"id":"msg_05","role":"assistant","content":[{"type":"tool_use","id":"toolu_b3","name":"Bash","input":{"command":"npm run build"}}]},"uuid":"b5","timestamp":"2026-03-10T10:00:04Z"}
+{"type":"user","message":{"id":"msg_06","role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_b3","content":"Error: build failed","is_error":true}]},"uuid":"b6","timestamp":"2026-03-10T10:00:05Z"}
+{"type":"assistant","message":{"id":"msg_07","role":"assistant","content":[{"type":"tool_use","id":"toolu_b4","name":"Bash","input":{"command":"tsc --noEmit"}}]},"uuid":"b7","timestamp":"2026-03-10T10:00:06Z"}
+{"type":"user","message":{"id":"msg_08","role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_b4","content":"Error: type errors found","is_error":true}]},"uuid":"b8","timestamp":"2026-03-10T10:00:07Z"}
+{"type":"assistant","message":{"id":"msg_09","role":"assistant","content":[{"type":"tool_use","id":"toolu_b5","name":"Bash","input":{"command":"npx jest --bail"}}]},"uuid":"b9","timestamp":"2026-03-10T10:00:08Z"}
+{"type":"user","message":{"id":"msg_10","role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_b5","content":"Error: jest not found","is_error":true}]},"uuid":"b10","timestamp":"2026-03-10T10:00:09Z"}

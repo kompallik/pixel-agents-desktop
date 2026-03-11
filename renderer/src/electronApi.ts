@@ -63,6 +63,7 @@ interface ElectronAPI {
   getReplaySnapshots(): Promise<ReplayStateSnapshot[]>;
   onReplayEvent(callback: (...args: unknown[]) => void): () => void;
   onReplayState(callback: (...args: unknown[]) => void): () => void;
+  openTranscript(filePath: string): Promise<string>;
 }
 
 declare global {

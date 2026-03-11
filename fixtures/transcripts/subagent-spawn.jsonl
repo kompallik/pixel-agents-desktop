@@ -1,0 +1,2 @@
+{"type":"assistant","message":{"id":"msg_01","role":"assistant","content":[{"type":"tool_use","id":"toolu_s1","name":"Task","input":{"description":"Refactor the auth module to use JWT tokens"}}]},"uuid":"s1","timestamp":"2026-03-10T10:00:00Z"}
+{"type":"user","message":{"id":"msg_02","role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_s1","content":"Subagent started: task_abc123"}]},"uuid":"s2","timestamp":"2026-03-10T10:00:01Z"}

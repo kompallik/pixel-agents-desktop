@@ -82,6 +82,11 @@ const api = {
   onReplayState(callback: MessageCallback): () => void {
     return api.on('replayState', callback);
   },
+
+  // Open file in system default app
+  openTranscript(filePath: string): Promise<string> {
+    return ipcRenderer.invoke('shell:openPath', filePath) as Promise<string>;
+  },
 };
 
 contextBridge.exposeInMainWorld('electronAPI', api);

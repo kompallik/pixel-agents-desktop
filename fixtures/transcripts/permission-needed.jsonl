@@ -1,0 +1,2 @@
+{"type":"assistant","message":{"id":"msg_01","role":"assistant","content":[{"type":"tool_use","id":"toolu_p1","name":"Bash","input":{"command":"rm -rf /tmp/build-cache"}}]},"uuid":"p1","timestamp":"2026-03-10T10:00:00Z"}
+{"type":"user","message":{"id":"msg_02","role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_p1","content":"Do you want to proceed? [y/N]"}]},"uuid":"p2","timestamp":"2026-03-10T10:00:01Z"}

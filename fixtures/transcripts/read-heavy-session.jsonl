@@ -1,0 +1,10 @@
+{"type":"assistant","message":{"id":"msg_01","role":"assistant","content":[{"type":"tool_use","id":"toolu_r1","name":"Read","input":{"file_path":"/app/src/main.ts"}}]},"uuid":"r1","timestamp":"2026-03-10T10:00:00Z"}
+{"type":"user","message":{"id":"msg_02","role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_r1","content":"import express from 'express';"}]},"uuid":"r2","timestamp":"2026-03-10T10:00:01Z"}
+{"type":"assistant","message":{"id":"msg_03","role":"assistant","content":[{"type":"tool_use","id":"toolu_r2","name":"Grep","input":{"pattern":"export","path":"/app/src"}}]},"uuid":"r3","timestamp":"2026-03-10T10:00:02Z"}
+{"type":"user","message":{"id":"msg_04","role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_r2","content":"src/utils.ts:1:export function add"}]},"uuid":"r4","timestamp":"2026-03-10T10:00:03Z"}
+{"type":"assistant","message":{"id":"msg_05","role":"assistant","content":[{"type":"tool_use","id":"toolu_r3","name":"Glob","input":{"pattern":"**/*.ts"}}]},"uuid":"r5","timestamp":"2026-03-10T10:00:04Z"}
+{"type":"user","message":{"id":"msg_06","role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_r3","content":"src/main.ts\nsrc/utils.ts"}]},"uuid":"r6","timestamp":"2026-03-10T10:00:05Z"}
+{"type":"assistant","message":{"id":"msg_07","role":"assistant","content":[{"type":"tool_use","id":"toolu_r4","name":"Read","input":{"file_path":"/app/src/utils.ts"}}]},"uuid":"r7","timestamp":"2026-03-10T10:00:06Z"}
+{"type":"user","message":{"id":"msg_08","role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_r4","content":"export function add(a, b) { return a + b; }"}]},"uuid":"r8","timestamp":"2026-03-10T10:00:07Z"}
+{"type":"assistant","message":{"id":"msg_09","role":"assistant","content":[{"type":"tool_use","id":"toolu_r5","name":"Read","input":{"file_path":"/app/package.json"}}]},"uuid":"r9","timestamp":"2026-03-10T10:00:08Z"}
+{"type":"user","message":{"id":"msg_10","role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_r5","content":"{\"name\":\"app\",\"version\":\"1.0.0\"}"}]},"uuid":"r10","timestamp":"2026-03-10T10:00:09Z"}

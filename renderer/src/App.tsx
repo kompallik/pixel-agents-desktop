@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { OfficeState } from './office/engine/officeState.js'
 import { OfficeCanvas } from './office/components/OfficeCanvas.js'
 import { ToolOverlay } from './office/components/ToolOverlay.js'
@@ -15,6 +15,10 @@ import { ZoomControls } from './components/ZoomControls.js'
 import { BottomToolbar } from './components/BottomToolbar.js'
 import { DebugView } from './components/DebugView.js'
 import { UpdateNotification } from './components/UpdateNotification.js'
+import { DashboardLayout } from './views/DashboardLayout.js'
+import { SessionList } from './components/SessionList.js'
+import { InspectorPanel } from './views/InspectorPanel.js'
+import { useSessionStore } from './stores/sessionStore.js'
 
 // Game state lives outside React — updated imperatively by message handlers
 const officeStateRef = { current: null as OfficeState | null }
@@ -125,8 +129,21 @@ function App() {
   const { agents, selectedAgent, agentTools, agentStatuses, agentTypes, subagentTools, subagentCharacters, layoutReady, loadedAssets } = useExtensionMessages(getOfficeState, editor.setLastSavedLayout, isEditDirty)
 
   const [isDebugMode, setIsDebugMode] = useState(false)
+  const [showSidebar, setShowSidebar] = useState(true)
+  const [showInspector, setShowInspector] = useState(false)
 
   const handleToggleDebugMode = useCallback(() => setIsDebugMode((prev) => !prev), [])
+
+  // Keyboard shortcuts: Cmd+2 toggle sidebar, Cmd+3 toggle inspector
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const meta = e.metaKey || e.ctrlKey
+      if (meta && e.key === '2') { e.preventDefault(); setShowSidebar((v) => !v) }
+      if (meta && e.key === '3') { e.preventDefault(); setShowInspector((v) => !v) }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   const handleSelectAgent = useCallback((id: number) => {
     api.send('focusAgent', { id })
@@ -151,13 +168,42 @@ function App() {
     api.send('closeAgent', { id })
   }, [])
 
+  const selectSession = useSessionStore((s) => s.selectSession)
+  const sessions = useSessionStore((s) => s.sessions)
+  const selectedSessionId = useSessionStore((s) => s.selectedSessionId)
+
+  // Auto-open inspector when a session is selected
+  useEffect(() => {
+    if (selectedSessionId) setShowInspector(true)
+  }, [selectedSessionId])
+
+  // Sync office selection state with session store
+  const selectedAgentIdFromSession = selectedSessionId
+    ? (sessions.get(selectedSessionId)?.agentId ?? null)
+    : null
+  if (selectedAgentIdFromSession !== null) {
+    const os = getOfficeState()
+    if (os.selectedAgentId !== selectedAgentIdFromSession) {
+      os.selectedAgentId = selectedAgentIdFromSession
+      os.cameraFollowId = selectedAgentIdFromSession
+    }
+  }
+
   const handleClick = useCallback((agentId: number) => {
     // If clicked agent is a sub-agent, focus the parent's terminal instead
     const os = getOfficeState()
     const meta = os.subagentMeta.get(agentId)
     const focusId = meta ? meta.parentAgentId : agentId
     api.send('focusAgent', { id: focusId })
-  }, [])
+
+    // Bridge click to session store: find session by agentId and select it
+    for (const session of sessions.values()) {
+      if (session.agentId === focusId) {
+        selectSession(session.sessionId)
+        break
+      }
+    }
+  }, [sessions, selectSession])
 
   const officeState = getOfficeState()
 
@@ -184,7 +230,7 @@ function App() {
     )
   }
 
-  return (
+  const centerPane = (
     <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
       <style>{`
         @keyframes pixel-agents-pulse {
@@ -308,8 +354,62 @@ function App() {
         />
       )}
 
+      {/* Toggle buttons when panels are collapsed */}
+      {!showSidebar && (
+        <button
+          onClick={() => setShowSidebar(true)}
+          style={{ position: 'absolute', top: 8, left: 8, zIndex: 45, padding: '3px 8px', fontSize: 14, background: 'rgba(30, 30, 46, 0.85)', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: 0, color: 'rgba(255, 255, 255, 0.6)', cursor: 'pointer' }}
+          title="Open sidebar (Cmd+2)"
+        >
+          Sessions
+        </button>
+      )}
+      {!showInspector && (
+        <button
+          onClick={() => setShowInspector(true)}
+          style={{ position: 'absolute', top: 8, right: 8, zIndex: 45, padding: '3px 8px', fontSize: 14, background: 'rgba(30, 30, 46, 0.85)', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: 0, color: 'rgba(255, 255, 255, 0.6)', cursor: 'pointer' }}
+          title="Open inspector (Cmd+3)"
+        >
+          Inspector
+        </button>
+      )}
+
       <UpdateNotification />
     </div>
+  )
+
+  const sidebarContent = (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 8px', borderBottom: '1px solid rgba(255, 255, 255, 0.06)', flexShrink: 0 }}>
+        <span style={{ fontSize: 16, fontWeight: 600, color: 'rgba(255, 255, 255, 0.7)' }}>Sessions</span>
+        <button onClick={() => setShowSidebar(false)} style={{ background: 'none', border: 'none', color: 'rgba(255, 255, 255, 0.4)', cursor: 'pointer', fontSize: 14, padding: '0 4px' }} title="Close sidebar (Cmd+2)">x</button>
+      </div>
+      <div style={{ flex: 1, overflow: 'hidden' }}>
+        <SessionList />
+      </div>
+    </>
+  )
+
+  const inspectorContent = (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 8px', borderBottom: '1px solid rgba(255, 255, 255, 0.06)', flexShrink: 0 }}>
+        <span style={{ fontSize: 16, fontWeight: 600, color: 'rgba(255, 255, 255, 0.7)' }}>Inspector</span>
+        <button onClick={() => setShowInspector(false)} style={{ background: 'none', border: 'none', color: 'rgba(255, 255, 255, 0.4)', cursor: 'pointer', fontSize: 14, padding: '0 4px' }} title="Close inspector (Cmd+3)">x</button>
+      </div>
+      <div style={{ flex: 1, overflow: 'auto' }}>
+        <InspectorPanel />
+      </div>
+    </>
+  )
+
+  return (
+    <DashboardLayout
+      sidebar={sidebarContent}
+      center={centerPane}
+      inspector={inspectorContent}
+      showSidebar={showSidebar}
+      showInspector={showInspector}
+    />
   )
 }
 

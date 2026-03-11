@@ -1,0 +1,4 @@
+{"type":"assistant","message":{"id":"msg_01","role":"assistant","content":[{"type":"tool_use","id":"toolu_w1","name":"Write","input":{"file_path":"/app/src/config.ts","content":"export const PORT = 3000;"}}]},"uuid":"w1","timestamp":"2026-03-10T10:00:00Z"}
+{"type":"user","message":{"id":"msg_02","role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_w1","content":"File written successfully"}]},"uuid":"w2","timestamp":"2026-03-10T10:00:01Z"}
+{"type":"system","subtype":"turn_duration","uuid":"w3","timestamp":"2026-03-10T10:00:02Z"}
+{"type":"assistant","message":{"id":"msg_03","role":"assistant","content":[{"type":"text","text":"I've made the changes. What would you like to do next?"}]},"uuid":"w4","timestamp":"2026-03-10T10:00:03Z"}

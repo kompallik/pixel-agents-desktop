@@ -767,6 +767,9 @@ function setupIPC(): void {
     return replayStore.getReplaySnapshots();
   });
 
+  // Open file path in system default application
+  ipcMain.handle('shell:openPath', (_event, filePath: string) => shell.openPath(filePath));
+
   // Stub handlers — no terminal management in standalone mode
   ipcMain.on('focusAgent', () => {});
   ipcMain.on('closeAgent', () => {});

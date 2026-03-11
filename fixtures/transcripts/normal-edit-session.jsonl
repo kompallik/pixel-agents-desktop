@@ -1,0 +1,7 @@
+{"type":"assistant","message":{"id":"msg_01","role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Write","input":{"file_path":"/app/src/utils.ts","content":"export function add(a: number, b: number) { return a + b; }"}}]},"uuid":"u1","timestamp":"2026-03-10T10:00:00Z"}
+{"type":"user","message":{"id":"msg_02","role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":"File written successfully"}]},"uuid":"u2","timestamp":"2026-03-10T10:00:01Z"}
+{"type":"assistant","message":{"id":"msg_03","role":"assistant","content":[{"type":"tool_use","id":"toolu_02","name":"Edit","input":{"file_path":"/app/src/utils.ts","old_string":"add","new_string":"sum"}}]},"uuid":"u3","timestamp":"2026-03-10T10:00:02Z"}
+{"type":"user","message":{"id":"msg_04","role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_02","content":"Edit applied"}]},"uuid":"u4","timestamp":"2026-03-10T10:00:03Z"}
+{"type":"assistant","message":{"id":"msg_05","role":"assistant","content":[{"type":"tool_use","id":"toolu_03","name":"Write","input":{"file_path":"/app/src/index.ts","content":"export { sum } from './utils';"}}]},"uuid":"u5","timestamp":"2026-03-10T10:00:04Z"}
+{"type":"user","message":{"id":"msg_06","role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_03","content":"File written successfully"}]},"uuid":"u6","timestamp":"2026-03-10T10:00:05Z"}
+{"type":"system","subtype":"turn_duration","uuid":"u7","timestamp":"2026-03-10T10:00:06Z"}

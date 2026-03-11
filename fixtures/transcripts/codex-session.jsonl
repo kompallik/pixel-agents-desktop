@@ -1,0 +1,7 @@
+{"type":"event_msg","payload":{"type":"task_started","task_id":"task_001","description":"Fix the login bug"},"uuid":"c1","timestamp":"2026-03-10T10:00:00Z"}
+{"type":"event_msg","payload":{"type":"agent_reasoning","content":"I need to look at the auth module first"},"uuid":"c2","timestamp":"2026-03-10T10:00:01Z"}
+{"type":"response_item","payload":{"type":"function_call","call_id":"call_01","name":"exec_command","arguments":"{\"cmd\":\"cat src/auth.ts\"}"},"uuid":"c3","timestamp":"2026-03-10T10:00:02Z"}
+{"type":"response_item","payload":{"type":"function_call_output","call_id":"call_01","output":"export function login() { ... }"},"uuid":"c4","timestamp":"2026-03-10T10:00:03Z"}
+{"type":"response_item","payload":{"type":"function_call","call_id":"call_02","name":"apply_patch","arguments":"--- a/src/auth.ts\n+++ b/src/auth.ts\nUpdate File: src/auth.ts\n@@ -1,1 +1,1 @@\n-export function login() { ... }\n+export function login(token: string) { ... }"},"uuid":"c5","timestamp":"2026-03-10T10:00:04Z"}
+{"type":"response_item","payload":{"type":"function_call_output","call_id":"call_02","output":"Patch applied successfully"},"uuid":"c6","timestamp":"2026-03-10T10:00:05Z"}
+{"type":"event_msg","payload":{"type":"user_message","content":"Looks good, thanks!"},"uuid":"c7","timestamp":"2026-03-10T10:00:06Z"}
