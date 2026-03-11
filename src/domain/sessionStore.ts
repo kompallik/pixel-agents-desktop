@@ -3,6 +3,8 @@ import { randomUUID } from 'crypto';
 import type { AgentEvent, AgentEventType } from './events.js';
 import type { SessionViewState } from './sessionState.js';
 import { sessionReducer } from './reducer.js';
+import { inferProjectInfo } from './projectMapper.js';
+import { detectCollisions, type CollisionInfo } from './collisionDetector.js';
 
 const MAX_EVENT_HISTORY = 100;
 const PUBLISH_DEBOUNCE_MS = 100;
@@ -16,6 +18,21 @@ export class SessionStore extends EventEmitter {
     this.sessions.set(state.sessionId, state);
     this.eventHistory.set(state.sessionId, []);
     this.schedulePublish();
+
+    // Async project mapping enrichment
+    inferProjectInfo(state.filePath, state.sessionId).then((info) => {
+      const current = this.sessions.get(state.sessionId);
+      if (!current) return;
+      this.sessions.set(state.sessionId, {
+        ...current,
+        projectName: info.projectName,
+        branch: info.branch,
+        worktree: info.worktree,
+      });
+      this.schedulePublish();
+    }).catch(() => {
+      // Project inference is best-effort; ignore failures
+    });
   }
 
   applyEvent(event: AgentEvent): void {
@@ -54,6 +71,21 @@ export class SessionStore extends EventEmitter {
 
   getEventHistory(sessionId: string): AgentEvent[] {
     return this.eventHistory.get(sessionId) ?? [];
+  }
+
+  getSessionsByProject(): Map<string, SessionViewState[]> {
+    const grouped = new Map<string, SessionViewState[]>();
+    for (const session of this.sessions.values()) {
+      const key = session.projectName ?? '(unknown)';
+      const list = grouped.get(key) ?? [];
+      list.push(session);
+      grouped.set(key, list);
+    }
+    return grouped;
+  }
+
+  getCollisions(): CollisionInfo[] {
+    return detectCollisions(this.sessions);
   }
 
   private schedulePublish(): void {

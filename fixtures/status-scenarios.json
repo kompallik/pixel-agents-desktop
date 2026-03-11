@@ -1,0 +1,308 @@
+[
+  {
+    "name": "editing - Write tool active",
+    "input": {
+      "timeSinceLastLine": 500,
+      "timeSinceLastToolCompletion": 5000,
+      "recentToolTypes": ["Write", "Read"],
+      "recentFailureCount": 0,
+      "hasActiveTools": true,
+      "activeToolNames": ["Write"],
+      "permissionSignalSeen": false,
+      "waitingSignalSeen": false,
+      "childSessionActive": false,
+      "fileWriteFreshness": 500,
+      "sourceState": "online",
+      "eventCount": 15
+    },
+    "expected": { "state": "editing", "minConfidence": 0.9 }
+  },
+  {
+    "name": "editing - Edit tool active",
+    "input": {
+      "timeSinceLastLine": 200,
+      "timeSinceLastToolCompletion": 3000,
+      "recentToolTypes": ["Edit"],
+      "recentFailureCount": 0,
+      "hasActiveTools": true,
+      "activeToolNames": ["Edit"],
+      "permissionSignalSeen": false,
+      "waitingSignalSeen": false,
+      "childSessionActive": false,
+      "fileWriteFreshness": 200,
+      "sourceState": "online",
+      "eventCount": 10
+    },
+    "expected": { "state": "editing", "minConfidence": 0.9 }
+  },
+  {
+    "name": "executing - Bash tool active",
+    "input": {
+      "timeSinceLastLine": 1000,
+      "timeSinceLastToolCompletion": 8000,
+      "recentToolTypes": ["Bash", "Read"],
+      "recentFailureCount": 0,
+      "hasActiveTools": true,
+      "activeToolNames": ["Bash"],
+      "permissionSignalSeen": false,
+      "waitingSignalSeen": false,
+      "childSessionActive": false,
+      "fileWriteFreshness": 5000,
+      "sourceState": "online",
+      "eventCount": 20
+    },
+    "expected": { "state": "executing", "minConfidence": 0.9 }
+  },
+  {
+    "name": "reading - Read tool active",
+    "input": {
+      "timeSinceLastLine": 300,
+      "timeSinceLastToolCompletion": 2000,
+      "recentToolTypes": ["Read", "Grep"],
+      "recentFailureCount": 0,
+      "hasActiveTools": true,
+      "activeToolNames": ["Read"],
+      "permissionSignalSeen": false,
+      "waitingSignalSeen": false,
+      "childSessionActive": false,
+      "fileWriteFreshness": 10000,
+      "sourceState": "online",
+      "eventCount": 12
+    },
+    "expected": { "state": "reading", "minConfidence": 0.9 }
+  },
+  {
+    "name": "reading - Grep tool active",
+    "input": {
+      "timeSinceLastLine": 400,
+      "timeSinceLastToolCompletion": 3000,
+      "recentToolTypes": ["Grep"],
+      "recentFailureCount": 0,
+      "hasActiveTools": true,
+      "activeToolNames": ["Grep"],
+      "permissionSignalSeen": false,
+      "waitingSignalSeen": false,
+      "childSessionActive": false,
+      "fileWriteFreshness": 15000,
+      "sourceState": "online",
+      "eventCount": 8
+    },
+    "expected": { "state": "reading", "minConfidence": 0.9 }
+  },
+  {
+    "name": "waiting_permission - permission requested, no response",
+    "input": {
+      "timeSinceLastLine": 10000,
+      "timeSinceLastToolCompletion": 15000,
+      "recentToolTypes": ["Read", "Edit"],
+      "recentFailureCount": 0,
+      "hasActiveTools": false,
+      "activeToolNames": [],
+      "permissionSignalSeen": true,
+      "waitingSignalSeen": false,
+      "childSessionActive": false,
+      "fileWriteFreshness": 20000,
+      "sourceState": "online",
+      "eventCount": 25
+    },
+    "expected": { "state": "waiting_permission", "minConfidence": 0.85 }
+  },
+  {
+    "name": "waiting_input - waiting for user, no tools",
+    "input": {
+      "timeSinceLastLine": 3000,
+      "timeSinceLastToolCompletion": 10000,
+      "recentToolTypes": ["Write", "Read"],
+      "recentFailureCount": 0,
+      "hasActiveTools": false,
+      "activeToolNames": [],
+      "permissionSignalSeen": false,
+      "waitingSignalSeen": true,
+      "childSessionActive": false,
+      "fileWriteFreshness": 15000,
+      "sourceState": "online",
+      "eventCount": 30
+    },
+    "expected": { "state": "waiting_input", "minConfidence": 0.8 }
+  },
+  {
+    "name": "idle - no tools, recent activity",
+    "input": {
+      "timeSinceLastLine": 15000,
+      "timeSinceLastToolCompletion": 20000,
+      "recentToolTypes": ["Read"],
+      "recentFailureCount": 0,
+      "hasActiveTools": false,
+      "activeToolNames": [],
+      "permissionSignalSeen": false,
+      "waitingSignalSeen": false,
+      "childSessionActive": false,
+      "fileWriteFreshness": 30000,
+      "sourceState": "online",
+      "eventCount": 50
+    },
+    "expected": { "state": "idle", "minConfidence": 0.7 }
+  },
+  {
+    "name": "stalled - long silence, source online",
+    "input": {
+      "timeSinceLastLine": 310000,
+      "timeSinceLastToolCompletion": 320000,
+      "recentToolTypes": ["Bash"],
+      "recentFailureCount": 0,
+      "hasActiveTools": false,
+      "activeToolNames": [],
+      "permissionSignalSeen": false,
+      "waitingSignalSeen": false,
+      "childSessionActive": false,
+      "fileWriteFreshness": 310000,
+      "sourceState": "online",
+      "eventCount": 40
+    },
+    "expected": { "state": "dormant", "minConfidence": 0.95 }
+  },
+  {
+    "name": "dormant - idle timeout exceeded",
+    "input": {
+      "timeSinceLastLine": 400000,
+      "timeSinceLastToolCompletion": 410000,
+      "recentToolTypes": [],
+      "recentFailureCount": 0,
+      "hasActiveTools": false,
+      "activeToolNames": [],
+      "permissionSignalSeen": false,
+      "waitingSignalSeen": false,
+      "childSessionActive": false,
+      "fileWriteFreshness": 400000,
+      "sourceState": "online",
+      "eventCount": 20
+    },
+    "expected": { "state": "dormant", "minConfidence": 0.95 }
+  },
+  {
+    "name": "errored - 3+ failures in last 60s",
+    "input": {
+      "timeSinceLastLine": 2000,
+      "timeSinceLastToolCompletion": 2000,
+      "recentToolTypes": ["Bash", "Bash", "Bash"],
+      "recentFailureCount": 4,
+      "hasActiveTools": false,
+      "activeToolNames": [],
+      "permissionSignalSeen": false,
+      "waitingSignalSeen": false,
+      "childSessionActive": false,
+      "fileWriteFreshness": 5000,
+      "sourceState": "online",
+      "eventCount": 35
+    },
+    "expected": { "state": "errored", "minConfidence": 0.7 }
+  },
+  {
+    "name": "starting - very early session",
+    "input": {
+      "timeSinceLastLine": 1000,
+      "timeSinceLastToolCompletion": 99999999,
+      "recentToolTypes": [],
+      "recentFailureCount": 0,
+      "hasActiveTools": false,
+      "activeToolNames": [],
+      "permissionSignalSeen": false,
+      "waitingSignalSeen": false,
+      "childSessionActive": false,
+      "fileWriteFreshness": 99999999,
+      "sourceState": "online",
+      "eventCount": 2
+    },
+    "expected": { "state": "starting", "minConfidence": 0.6 }
+  },
+  {
+    "name": "edge - rapid tool transition: editing wins over reading",
+    "input": {
+      "timeSinceLastLine": 100,
+      "timeSinceLastToolCompletion": 500,
+      "recentToolTypes": ["Read", "Edit", "Grep"],
+      "recentFailureCount": 0,
+      "hasActiveTools": true,
+      "activeToolNames": ["Edit", "Read"],
+      "permissionSignalSeen": false,
+      "waitingSignalSeen": false,
+      "childSessionActive": false,
+      "fileWriteFreshness": 100,
+      "sourceState": "online",
+      "eventCount": 18
+    },
+    "expected": { "state": "editing", "minConfidence": 0.95 }
+  },
+  {
+    "name": "edge - permission then activity resumes (tools override permission)",
+    "input": {
+      "timeSinceLastLine": 500,
+      "timeSinceLastToolCompletion": 1000,
+      "recentToolTypes": ["Bash"],
+      "recentFailureCount": 0,
+      "hasActiveTools": true,
+      "activeToolNames": ["Bash"],
+      "permissionSignalSeen": true,
+      "waitingSignalSeen": false,
+      "childSessionActive": false,
+      "fileWriteFreshness": 3000,
+      "sourceState": "online",
+      "eventCount": 22
+    },
+    "expected": { "state": "executing", "minConfidence": 0.9 }
+  },
+  {
+    "name": "edge - stale source offline",
+    "input": {
+      "timeSinceLastLine": 350000,
+      "timeSinceLastToolCompletion": 360000,
+      "recentToolTypes": ["Read"],
+      "recentFailureCount": 0,
+      "hasActiveTools": false,
+      "activeToolNames": [],
+      "permissionSignalSeen": false,
+      "waitingSignalSeen": false,
+      "childSessionActive": false,
+      "fileWriteFreshness": 350000,
+      "sourceState": "offline",
+      "eventCount": 15
+    },
+    "expected": { "state": "dormant", "minConfidence": 0.95 }
+  },
+  {
+    "name": "edge - errored but tool still active (tool wins)",
+    "input": {
+      "timeSinceLastLine": 1000,
+      "timeSinceLastToolCompletion": 3000,
+      "recentToolTypes": ["Bash", "Bash", "Bash"],
+      "recentFailureCount": 3,
+      "hasActiveTools": true,
+      "activeToolNames": ["Write"],
+      "permissionSignalSeen": false,
+      "waitingSignalSeen": false,
+      "childSessionActive": false,
+      "fileWriteFreshness": 1000,
+      "sourceState": "online",
+      "eventCount": 25
+    },
+    "expected": { "state": "editing", "minConfidence": 0.95 }
+  },
+  {
+    "name": "edge - no signals at all (fallback idle)",
+    "input": {
+      "timeSinceLastLine": 2000,
+      "timeSinceLastToolCompletion": 99999999,
+      "recentToolTypes": [],
+      "recentFailureCount": 0,
+      "hasActiveTools": false,
+      "activeToolNames": [],
+      "permissionSignalSeen": false,
+      "waitingSignalSeen": false,
+      "childSessionActive": false,
+      "fileWriteFreshness": 99999999,
+      "sourceState": "online",
+      "eventCount": 10
+    },
+    "expected": { "state": "idle", "minConfidence": 0.5 }
+  }
+]

@@ -1,36 +1,28 @@
 import type { AgentEvent } from './events.js';
-import type { SessionViewState, ToolInfo, StatusAssessment } from './sessionState.js';
+import type { SessionViewState, ToolInfo } from './sessionState.js';
+import { assessStatus, buildStatusInput } from './statusEngine.js';
 
 const MAX_RECENT_TOOLS = 10;
-
-const TOOL_NAME_TO_STATUS: Record<string, StatusAssessment['state']> = {
-  Read: 'reading',
-  Grep: 'reading',
-  Glob: 'reading',
-  Edit: 'editing',
-  Write: 'editing',
-  NotebookEdit: 'editing',
-  Bash: 'executing',
-  WebFetch: 'executing',
-  WebSearch: 'executing',
-};
-
-function inferStatusFromTools(activeTools: ToolInfo[]): StatusAssessment {
-  if (activeTools.length === 0) {
-    return { state: 'idle', confidence: 0.5, reasons: ['No active tools'] };
-  }
-  for (const tool of activeTools) {
-    const mapped = TOOL_NAME_TO_STATUS[tool.toolName];
-    if (mapped) {
-      return { state: mapped, confidence: 0.8, reasons: [`Active tool: ${tool.toolName}`] };
-    }
-  }
-  return { state: 'executing', confidence: 0.6, reasons: [`Active tool: ${activeTools[0].toolName}`] };
-}
+const FAILURE_WINDOW_MS = 60_000;
 
 function addToRecentTools(recentTools: ToolInfo[], tool: ToolInfo): ToolInfo[] {
   const updated = [tool, ...recentTools];
   return updated.length > MAX_RECENT_TOOLS ? updated.slice(0, MAX_RECENT_TOOLS) : updated;
+}
+
+function countRecentFailures(recentTools: ToolInfo[], now: number): number {
+  const cutoff = now - FAILURE_WINDOW_MS;
+  return recentTools.filter(t => {
+    if (t.status !== 'failed' || !t.completedAt) return false;
+    return new Date(t.completedAt).getTime() >= cutoff;
+  }).length;
+}
+
+function reassess(state: SessionViewState): SessionViewState {
+  const now = Date.now();
+  const failures = countRecentFailures(state.recentTools, now);
+  const input = buildStatusInput(state, now, undefined, failures);
+  return { ...state, status: assessStatus(input) };
 }
 
 export function sessionReducer(state: SessionViewState, event: AgentEvent): SessionViewState {
@@ -49,9 +41,9 @@ export function sessionReducer(state: SessionViewState, event: AgentEvent): Sess
     }
 
     case 'tool_started': {
-      if (!event.toolId) return base;
+      if (!event.toolId) return reassess(base);
       const alreadyActive = base.activeTools.some(t => t.toolId === event.toolId);
-      if (alreadyActive) return base;
+      if (alreadyActive) return reassess(base);
 
       const newTool: ToolInfo = {
         toolId: event.toolId,
@@ -59,16 +51,11 @@ export function sessionReducer(state: SessionViewState, event: AgentEvent): Sess
         status: 'active',
         startedAt: event.timestamp,
       };
-      const activeTools = [...base.activeTools, newTool];
-      return {
-        ...base,
-        activeTools,
-        status: inferStatusFromTools(activeTools),
-      };
+      return reassess({ ...base, activeTools: [...base.activeTools, newTool] });
     }
 
     case 'tool_completed': {
-      if (!event.toolId) return base;
+      if (!event.toolId) return reassess(base);
       const completed = base.activeTools.find(t => t.toolId === event.toolId);
       const activeTools = base.activeTools.filter(t => t.toolId !== event.toolId);
       const recentTools = completed
@@ -79,18 +66,11 @@ export function sessionReducer(state: SessionViewState, event: AgentEvent): Sess
           })
         : base.recentTools;
 
-      return {
-        ...base,
-        activeTools,
-        recentTools,
-        status: activeTools.length > 0
-          ? inferStatusFromTools(activeTools)
-          : { state: 'idle', confidence: 0.5, reasons: ['Tool completed, no remaining tools'] },
-      };
+      return reassess({ ...base, activeTools, recentTools });
     }
 
     case 'tool_failed': {
-      if (!event.toolId) return base;
+      if (!event.toolId) return reassess(base);
       const failed = base.activeTools.find(t => t.toolId === event.toolId);
       const activeTools = base.activeTools.filter(t => t.toolId !== event.toolId);
       const recentTools = failed
@@ -101,14 +81,7 @@ export function sessionReducer(state: SessionViewState, event: AgentEvent): Sess
           })
         : base.recentTools;
 
-      return {
-        ...base,
-        activeTools,
-        recentTools,
-        status: activeTools.length > 0
-          ? inferStatusFromTools(activeTools)
-          : { state: 'idle', confidence: 0.5, reasons: ['Tool failed, no remaining tools'] },
-      };
+      return reassess({ ...base, activeTools, recentTools });
     }
 
     case 'subagent_spawned': {
@@ -138,12 +111,7 @@ export function sessionReducer(state: SessionViewState, event: AgentEvent): Sess
     }
 
     case 'permission_cleared': {
-      return {
-        ...base,
-        status: base.activeTools.length > 0
-          ? inferStatusFromTools(base.activeTools)
-          : { state: 'idle', confidence: 0.5, reasons: ['Permission cleared'] },
-      };
+      return reassess(base);
     }
 
     case 'waiting_for_input': {
@@ -163,12 +131,7 @@ export function sessionReducer(state: SessionViewState, event: AgentEvent): Sess
       for (const tool of staleTools) {
         recentTools = addToRecentTools(recentTools, tool);
       }
-      return {
-        ...base,
-        activeTools: [],
-        recentTools,
-        status: { state: 'idle', confidence: 0.7, reasons: ['Turn completed'] },
-      };
+      return reassess({ ...base, activeTools: [], recentTools });
     }
 
     case 'session_idle': {

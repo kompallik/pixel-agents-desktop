@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, Tray, nativeImage } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, nativeImage } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -21,7 +21,6 @@ import type { AgentEvent } from './domain/events.js';
 let mainWindow: BrowserWindow | null = null;
 let registry: SessionRegistry | null = null;
 let sourceManager: SessionSourceManager | null = null;
-let tray: Tray | null = null;
 let isQuitting = false;
 
 const CONFIG_DIR = '.pixel-agents';
@@ -118,7 +117,6 @@ function send(channel: string, data?: unknown): void {
   mainWindow?.webContents.send(channel, data ?? {});
 }
 
-
 function getIconPath(): string | undefined {
   const packaged = app.isPackaged
     ? path.join(process.resourcesPath, 'icon.png')
@@ -176,7 +174,7 @@ function startDiscovery(): void {
     send('sessionStateUpdate', sessions);
   });
 
-  // When a session is registered, create an AgentState and start watching
+  // When a session is registered, create ingestion controller and start watching
   registry.on('session-registered', (record: SessionRecord) => {
     const agentId = nextAgentId++;
     sessionToAgentId.set(record.sessionId, agentId);
@@ -185,36 +183,10 @@ function startDiscovery(): void {
     const stat = fs.statSync(record.filePath);
     const fileOffset = record.importMode === 'replay' ? 0 : stat.size;
 
-    const agent: AgentState = {
-      id: agentId,
-      agentType: record.agentType,
-      projectDir: path.dirname(record.filePath),
-      jsonlFile: record.filePath,
-      fileOffset,
-      lineBuffer: '',
-      activeToolIds: new Set(),
-      activeToolStatuses: new Map(),
-      activeToolNames: new Map(),
-      activeSubagentToolIds: new Map(),
-      activeSubagentToolNames: new Map(),
-      isWaiting: false,
-      permissionSent: false,
-      hadToolsInTurn: false,
-    };
-    agents.set(agentId, agent);
-
     console.log(`[Pixel Agents] Sending agentCreated for agent ${agentId} (session ${record.sessionId})`);
     send('agentCreated', { id: agentId, agentType: record.agentType });
 
-    // Legacy pipeline (kept for backward compat until Phase 4)
-    startFileWatching(
-      agentId, record.filePath,
-      agents, fileWatchers, pollingTimers, waitingTimers, permissionTimers,
-      bridge,
-    );
-    readNewLines(agentId, agents, waitingTimers, permissionTimers, bridge);
-
-    // New domain event pipeline
+    // Register session in domain store
     const sessionState = createInitialSessionState(
       record.sessionId,
       agentId,
@@ -222,10 +194,11 @@ function startDiscovery(): void {
       record.agentType,
       record.filePath,
     );
-    sessionState.projectName = record.projectName;
+    sessionState.projectName = path.basename(path.dirname(record.filePath));
     sessionState.runMode = record.importMode === 'replay' ? 'replay' : 'live';
     domainStore.registerSession(sessionState);
 
+    // Create ingestion controller (replaces legacy fileWatcher + transcriptParser)
     const controller = new IngestionController({
       sessionId: record.sessionId,
       filePath: record.filePath,
@@ -241,14 +214,13 @@ function startDiscovery(): void {
     controller.start();
   });
 
-  // When a session is removed, stop watching and notify renderer
+  // When a session is removed, stop controller and notify renderer
   registry.on('session-removed', (record: SessionRecord) => {
     const agentId = sessionToAgentId.get(record.sessionId);
     if (agentId === undefined) return;
 
     console.log(`[Pixel Agents] Agent ${agentId} session removed`);
-    stopFileWatching(agentId, fileWatchers, pollingTimers, waitingTimers, permissionTimers);
-    agents.delete(agentId);
+    cancelPermissionTimer(agentId);
     sessionToAgentId.delete(record.sessionId);
     send('agentClosed', { id: agentId });
 
@@ -268,10 +240,15 @@ function startDiscovery(): void {
   }
 }
 
-/** Backward compatibility: emit legacy IPC messages from domain events */
+/** Backward compatibility: emit legacy IPC messages from domain events.
+ *  This bridge keeps the existing renderer working until Phase 4 migration. */
 function emitLegacyFromDomainEvent(agentId: number, event: AgentEvent): void {
   switch (event.type) {
-    case 'tool_started':
+    case 'tool_started': {
+      // Emit active status + tool start (matches old pipeline behavior)
+      cancelPermissionTimer(agentId);
+      send('agentStatus', { id: agentId, status: 'active' });
+
       if (!event.parentToolId) {
         send('agentToolStart', { id: agentId, toolId: event.toolId, status: event.status });
       } else {
@@ -282,8 +259,12 @@ function emitLegacyFromDomainEvent(agentId: number, event: AgentEvent): void {
           status: event.status,
         });
       }
+
+      // Start permission timer for non-exempt tools
+      resetPermissionTimer(agentId, event);
       break;
-    case 'tool_completed':
+    }
+    case 'tool_completed': {
       if (!event.parentToolId) {
         send('agentToolDone', { id: agentId, toolId: event.toolId });
       } else {
@@ -294,27 +275,63 @@ function emitLegacyFromDomainEvent(agentId: number, event: AgentEvent): void {
         });
       }
       break;
+    }
+    case 'subagent_spawned':
+      // Subagent spawned is already covered by tool_started with parentToolId
+      break;
+    case 'subagent_completed':
+      if (event.parentToolId) {
+        send('subagentClear', { id: agentId, parentToolId: event.parentToolId });
+      }
+      break;
     case 'waiting_for_input':
+      cancelPermissionTimer(agentId);
       send('agentStatus', { id: agentId, status: 'waiting' });
       break;
     case 'session_attached':
+      cancelPermissionTimer(agentId);
       send('agentStatus', { id: agentId, status: 'active' });
       break;
     case 'permission_requested':
       send('agentToolPermission', { id: agentId });
       break;
     case 'permission_cleared':
+      cancelPermissionTimer(agentId);
       send('agentToolPermissionClear', { id: agentId });
       break;
     case 'turn_completed':
+      cancelPermissionTimer(agentId);
       send('agentToolsClear', { id: agentId });
       send('agentStatus', { id: agentId, status: 'waiting' });
       break;
     case 'session_dormant':
+      cancelPermissionTimer(agentId);
       send('agentClosed', { id: agentId });
       break;
     default:
       break;
+  }
+}
+
+/** Start/reset permission timer when a non-exempt tool is active */
+function resetPermissionTimer(agentId: number, event: AgentEvent): void {
+  const toolName = event.toolName ?? '';
+  if (PERMISSION_EXEMPT_TOOLS.has(toolName)) return;
+
+  cancelPermissionTimer(agentId);
+  const timer = setTimeout(() => {
+    permissionTimers.delete(agentId);
+    console.log(`[Pixel Agents] Agent ${agentId}: possible permission wait detected`);
+    send('agentToolPermission', { id: agentId });
+  }, PERMISSION_TIMER_DELAY_MS);
+  permissionTimers.set(agentId, timer);
+}
+
+function cancelPermissionTimer(agentId: number): void {
+  const existing = permissionTimers.get(agentId);
+  if (existing) {
+    clearTimeout(existing);
+    permissionTimers.delete(agentId);
   }
 }
 
@@ -323,16 +340,16 @@ function stopDiscovery(): void {
     sourceManager.stopAll();
     sourceManager = null;
   }
-  // Stop all file watchers
-  for (const agentId of agents.keys()) {
-    stopFileWatching(agentId, fileWatchers, pollingTimers, waitingTimers, permissionTimers);
-  }
   // Stop all ingestion controllers
   for (const controller of ingestionControllers.values()) {
     controller.destroy();
   }
   ingestionControllers.clear();
-  agents.clear();
+  // Clean up permission timers
+  for (const timer of permissionTimers.values()) {
+    clearTimeout(timer);
+  }
+  permissionTimers.clear();
   sessionToAgentId.clear();
   domainStore.removeAllListeners();
   registry?.removeAllListeners();
@@ -443,45 +460,34 @@ function setupIPC(): void {
       ? registry.getAllSessions().map((s) => s.filePath)
       : [];
 
-    const agentDiags = [...agents.values()].map((a) => ({
-      id: a.id,
-      agentType: a.agentType,
-      jsonlFile: a.jsonlFile,
-      fileOffset: a.fileOffset,
-      bufferSize: a.lineBuffer.length,
-    }));
-
-    const activeWatchers = [...fileWatchers.keys()].map(String);
-    const bufferSizes: Record<string, number> = {};
-    for (const [id, agent] of agents) {
-      bufferSizes[String(id)] = agent.lineBuffer.length;
-    }
-
     const domainSessions = domainStore.getAllSessions().map((s) => ({
       sessionId: s.sessionId,
       agentId: s.agentId,
+      agentType: s.agentType,
+      filePath: s.filePath,
       status: s.status.state,
       eventCount: s.eventCount,
       activeTools: s.activeTools.length,
       runMode: s.runMode,
     }));
 
+    const controllerDiags: Record<string, { offset: number }> = {};
+    for (const [sessionId, controller] of ingestionControllers) {
+      controllerDiags[sessionId] = { offset: controller.currentOffset };
+    }
+
     const mem = process.memoryUsage();
     send('diagnosticsDump', {
       discovery: {
         knownFiles,
-        agentCount: agents.size,
+        agentCount: domainSessions.length,
         scanInterval: DISCOVERY_SCAN_INTERVAL_MS,
-        agents: agentDiags,
-      },
-      fileWatcher: {
-        activeWatchers,
-        bufferSizes,
       },
       domainStore: {
         sessionCount: domainSessions.length,
         sessions: domainSessions,
         ingestionControllers: ingestionControllers.size,
+        controllers: controllerDiags,
       },
       memory: {
         heapUsed: mem.heapUsed,
@@ -611,12 +617,13 @@ app.whenReady().then(() => {
   if (process.platform === 'darwin') {
     const iconPath = getIconPath();
     if (iconPath) {
-      app.dock.setIcon(nativeImage.createFromPath(iconPath));
+      app.dock?.setIcon(nativeImage.createFromPath(iconPath));
     }
   }
 
   mainWindow = createWindow();
-  tray = createTray(mainWindow);
+  // Keep tray reference alive to prevent GC
+  createTray(mainWindow);
   setupIPC();
 
   if (app.isPackaged) {
