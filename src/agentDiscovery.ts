@@ -45,6 +45,22 @@ export class AgentDiscovery {
     return [...this.agents.keys()];
   }
 
+  getDiagnostics(): { knownFiles: string[]; agentCount: number; scanInterval: number; agents: Array<{ id: number; agentType: string; jsonlFile: string; fileOffset: number; bufferSize: number }> } {
+    const agents = [...this.agents.values()].map((a) => ({
+      id: a.id,
+      agentType: a.agentType,
+      jsonlFile: a.jsonlFile,
+      fileOffset: a.fileOffset,
+      bufferSize: a.lineBuffer.length,
+    }));
+    return {
+      knownFiles: [...this.knownFiles.keys()],
+      agentCount: this.agents.size,
+      scanInterval: DISCOVERY_SCAN_INTERVAL_MS,
+      agents,
+    };
+  }
+
   private scan(): void {
     // Scan Claude Code projects
     const claudeDir = path.join(os.homedir(), CLAUDE_PROJECTS_DIR);

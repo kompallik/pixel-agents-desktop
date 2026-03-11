@@ -293,6 +293,39 @@ function setupIPC(): void {
     openReleaseUrl();
   });
 
+  ipcMain.on('requestDiagnostics', () => {
+    const discDiag = discovery
+      ? discovery.getDiagnostics()
+      : { knownFiles: [], agentCount: 0, scanInterval: 0, agents: [] };
+
+    const activeWatchers = [...fileWatchers.keys()].map(String);
+    const bufferSizes: Record<string, number> = {};
+    if (discovery) {
+      for (const [id, agent] of discovery.getAgents()) {
+        bufferSizes[String(id)] = agent.lineBuffer.length;
+      }
+    }
+
+    const mem = process.memoryUsage();
+    send('diagnosticsDump', {
+      discovery: {
+        knownFiles: discDiag.knownFiles,
+        agentCount: discDiag.agentCount,
+        scanInterval: discDiag.scanInterval,
+        agents: discDiag.agents,
+      },
+      fileWatcher: {
+        activeWatchers,
+        bufferSizes,
+      },
+      memory: {
+        heapUsed: mem.heapUsed,
+        heapTotal: mem.heapTotal,
+        rss: mem.rss,
+      },
+    });
+  });
+
   // Stub handlers — no terminal management in standalone mode
   ipcMain.on('focusAgent', () => {});
   ipcMain.on('closeAgent', () => {});
