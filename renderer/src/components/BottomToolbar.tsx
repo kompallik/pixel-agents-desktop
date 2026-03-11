@@ -89,9 +89,9 @@ export function BottomToolbar({
       </button>
       <button
         onClick={async () => {
-          const result = await api.invoke('dialog:openFile', { filters: [{ name: 'JSONL', extensions: ['jsonl'] }] }) as string | null
-          if (result) {
-            api.startReplay(result, 1)
+          const result = await api.invoke('selectJsonlFile') as { canceled: boolean; filePath?: string }
+          if (!result.canceled && result.filePath) {
+            api.startReplay(result.filePath, 1)
           }
         }}
         onMouseEnter={() => setHovered('replay')}
