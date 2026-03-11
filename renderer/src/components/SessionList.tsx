@@ -35,7 +35,8 @@ interface SessionRowProps {
 }
 
 function SessionRow({ session, isSelected, onSelect }: SessionRowProps) {
-  const alerts = useAlertStore((s) => getAlertsBySession(s.alerts, session.sessionId))
+  const alertsMap = useAlertStore((s) => s.alerts)
+  const alerts = useMemo(() => getAlertsBySession(alertsMap, session.sessionId), [alertsMap, session.sessionId])
   const displayName = session.projectName ?? truncatePath(session.filePath)
 
   return (
