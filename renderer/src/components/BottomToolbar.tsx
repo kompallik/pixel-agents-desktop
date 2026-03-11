@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { SettingsModal } from './SettingsModal.js'
+import type { SettingsTab } from './SettingsModal.js'
 
 interface BottomToolbarProps {
   isEditMode: boolean
@@ -48,6 +49,12 @@ export function BottomToolbar({
 }: BottomToolbarProps) {
   const [hovered, setHovered] = useState<string | null>(null)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('general')
+
+  const openSettings = (tab: SettingsTab = 'general') => {
+    setSettingsTab(tab)
+    setIsSettingsOpen(true)
+  }
 
   return (
     <div style={panelStyle}>
@@ -67,9 +74,21 @@ export function BottomToolbar({
       >
         Layout
       </button>
+      <button
+        onClick={() => openSettings('sources')}
+        onMouseEnter={() => setHovered('addSession')}
+        onMouseLeave={() => setHovered(null)}
+        style={{
+          ...btnBase,
+          background: hovered === 'addSession' ? 'var(--pixel-btn-hover-bg)' : btnBase.background,
+        }}
+        title="Add session source"
+      >
+        + Session
+      </button>
       <div style={{ position: 'relative' }}>
         <button
-          onClick={() => setIsSettingsOpen((v) => !v)}
+          onClick={() => openSettings('general')}
           onMouseEnter={() => setHovered('settings')}
           onMouseLeave={() => setHovered(null)}
           style={
@@ -89,6 +108,7 @@ export function BottomToolbar({
           onClose={() => setIsSettingsOpen(false)}
           isDebugMode={isDebugMode}
           onToggleDebugMode={onToggleDebugMode}
+          initialTab={settingsTab}
         />
       </div>
     </div>

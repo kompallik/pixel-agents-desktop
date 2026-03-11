@@ -8,6 +8,13 @@ interface SourceResult {
   config?: unknown;
 }
 
+interface ReplayResult {
+  success: boolean;
+  error?: string;
+  sessionId?: string;
+  snapshot?: unknown;
+}
+
 const api = {
   send(channel: string, data?: unknown): void {
     ipcRenderer.send(channel, data);
@@ -54,6 +61,26 @@ const api = {
   },
   getActiveAlerts(): Promise<unknown[]> {
     return ipcRenderer.invoke('getActiveAlerts') as Promise<unknown[]>;
+  },
+
+  // ── Replay (WP-6A) ──────────────────────────────────────
+  startReplay(filePath: string, speed?: number): Promise<ReplayResult> {
+    return ipcRenderer.invoke('startReplay', { filePath, speed }) as Promise<ReplayResult>;
+  },
+  replayControl(sessionId: string, action: string, value?: unknown): Promise<ReplayResult> {
+    return ipcRenderer.invoke('replayControl', { sessionId, action, value }) as Promise<ReplayResult>;
+  },
+  stopReplay(sessionId: string): Promise<SourceResult> {
+    return ipcRenderer.invoke('stopReplay', { sessionId }) as Promise<SourceResult>;
+  },
+  getReplaySnapshots(): Promise<unknown[]> {
+    return ipcRenderer.invoke('getReplaySnapshots') as Promise<unknown[]>;
+  },
+  onReplayEvent(callback: MessageCallback): () => void {
+    return api.on('replayEvent', callback);
+  },
+  onReplayState(callback: MessageCallback): () => void {
+    return api.on('replayState', callback);
   },
 };
 

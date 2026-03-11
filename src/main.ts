@@ -18,7 +18,7 @@ import type { SessionViewState } from './domain/sessionState.js';
 import { IngestionController } from './ingest/ingestionController.js';
 import type { AgentEvent } from './domain/events.js';
 import { ReplayStore } from './domain/replayStore.js';
-import type { ReplayStateSnapshot, JumpTarget } from './ingest/replayController.js';
+import type { ReplayStateSnapshot } from './ingest/replayController.js';
 import { detectAgentType } from './discovery/sessionSources/manualPathSource.js';
 import { AlertEngine } from './domain/alertEngine.js';
 import { computeHealth } from './domain/healthEngine.js';
@@ -408,6 +408,8 @@ function stopDiscovery(): void {
     clearTimeout(alertEvalTimer);
     alertEvalTimer = null;
   }
+  replayStore.stopAll();
+  replayStore.removeAllListeners();
   sessionToAgentId.clear();
   domainStore.removeAllListeners();
   registry?.removeAllListeners();
@@ -709,7 +711,7 @@ function setupIPC(): void {
 
   ipcMain.handle('startReplay', (_event, data: { filePath: string; speed?: number }) => {
     try {
-      const agentType: 'claude' | 'codex' = data.filePath.includes('.codex') ? 'codex' : 'claude';
+      const agentType = detectAgentType(data.filePath) ?? 'claude';
       const sessionId = replayStore.startReplay(data.filePath, agentType, data.speed);
       const controller = replayStore.getController(sessionId);
       return { success: true, sessionId, snapshot: controller?.getSnapshot() };

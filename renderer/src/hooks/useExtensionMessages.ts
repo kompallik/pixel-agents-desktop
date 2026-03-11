@@ -7,8 +7,10 @@ import { buildDynamicCatalog } from '../office/layout/furnitureCatalog.js'
 import { setFloorSprites } from '../office/floorTiles.js'
 import { setWallSprites } from '../office/wallTiles.js'
 import { setCharacterTemplates } from '../office/sprites/spriteData.js'
-import { api } from '../electronApi.js'
+import { api, onSessionStateUpdate } from '../electronApi.js'
 import { playDoneSound, setSoundEnabled } from '../notificationSound.js'
+import { useSessionStore } from '../stores/sessionStore.js'
+import type { SessionViewState } from '../types/domainTypes.js'
 
 export interface SubagentCharacter {
   id: number
@@ -355,6 +357,28 @@ export function useExtensionMessages(
         }
       }
     }
+    // Subscribe to domain session state updates (Zustand bridge)
+    const unsubSessionState = onSessionStateUpdate((sessions: SessionViewState[]) => {
+      useSessionStore.getState().updateSessions(sessions)
+
+      // Bridge to existing office character management:
+      // Ensure each session's agent has a corresponding office character
+      const os = getOfficeState()
+      for (const session of sessions) {
+        const id = session.agentId
+        if (!os.characters.has(id)) {
+          os.addAgent(id)
+          setAgents((prev) => (prev.includes(id) ? prev : [...prev, id]))
+          setAgentTypes((prev) => ({ ...prev, [id]: session.agentType }))
+        }
+        // Sync active state based on session status
+        const isActive = session.status.state !== 'idle' &&
+          session.status.state !== 'dormant' &&
+          session.status.state !== 'completed'
+        os.setAgentActive(id, isActive)
+      }
+    })
+
     const channels = [
       'agentCreated', 'agentClosed', 'agentToolStart', 'agentToolDone',
       'agentToolsClear', 'agentStatus', 'agentSelected', 'agentToolPermission',
@@ -369,7 +393,10 @@ export function useExtensionMessages(
       })
     )
     api.send('webviewReady')
-    return () => cleanups.forEach(cleanup => cleanup())
+    return () => {
+      unsubSessionState()
+      cleanups.forEach(cleanup => cleanup())
+    }
   }, [getOfficeState])
 
   return { agents, selectedAgent, agentTools, agentStatuses, agentTypes, subagentTools, subagentCharacters, layoutReady, loadedAssets }
